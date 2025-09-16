@@ -3,7 +3,6 @@ const API_BASE = `https://generativelanguage.googleapis.com/v1beta/models/${MODE
 
 const MAX_CONTEXT_LENGTH = 6000;
 
-const apiKeyInput = document.getElementById("apiKey");
 const statusEl = document.getElementById("status");
 const contextSection = document.getElementById("contextSection");
 const contextPreview = document.getElementById("contextPreview");
@@ -23,14 +22,10 @@ async function init() {
 
   try {
     const envKey = await getEnvApiKey();
-    if (envKey && apiKeyInput) {
-      apiKeyInput.placeholder = "Using key from extension/.env (override by typing)";
-    }
-
     if (envKey) {
-      setStatus("Ready when you are! Highlight text for a tighter focus.");
+      setStatus("Ready! Your Gemini key was loaded from extension/.env. Highlight text for a tighter focus.");
     } else {
-      setStatus("Add your Gemini API key in extension/.env or paste it above before generating.");
+      setStatus("Add your Gemini API key to extension/.env before generating.");
     }
   } catch (error) {
     console.warn("Unable to load .env", error);
@@ -83,11 +78,6 @@ function parseApiKeyFromEnv(text) {
 }
 
 async function resolveApiKey() {
-  const manualValue = apiKeyInput?.value.trim();
-  if (manualValue) {
-    return manualValue;
-  }
-
   const envKey = await getEnvApiKey();
   return envKey?.trim() ?? "";
 }
@@ -95,8 +85,7 @@ async function resolveApiKey() {
 async function handleGenerate(action) {
   const apiKey = await resolveApiKey();
   if (!apiKey) {
-    setStatus("Add your Gemini API key to get started.", { error: true });
-    apiKeyInput?.focus();
+    setStatus("Add your Gemini API key to extension/.env to get started.", { error: true });
     return;
   }
 
