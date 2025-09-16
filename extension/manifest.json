@@ -5,8 +5,7 @@
   "description": "Turn any web page into a personalized study guide with summaries, flashcards, and quizzes powered by Google Gemini Flash.",
   "permissions": [
     "activeTab",
-    "scripting",
-    "storage"
+    "scripting"
   ],
   "host_permissions": [
     "https://generativelanguage.googleapis.com/*"

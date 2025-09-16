@@ -7,8 +7,7 @@ Gemini Flashcards Tutor is a Chrome extension that turns any article, research p
 - **One-click summaries** – distill complex pages into digestible bullet points and actionable takeaways.
 - **AI-generated flashcards** – create 6-10 question/answer pairs in Markdown that you can copy into your favourite spaced repetition tool.
 - **Quick quizzes** – produce five multiple-choice questions with explanations to reinforce understanding.
-- **Focus-aware prompts** – optionally add study goals (exam, certification, audience, etc.) or highlight a passage to steer the response.
-- **Local settings** – your Gemini API key and focus preferences are saved securely with `chrome.storage.sync` on your Google account.
+- **Environment-based API key** – keep your Gemini API key in `extension/.env` or paste it at runtime; the extension never stores it in Chrome Sync.
 
 ## Requirements
 
@@ -22,16 +21,16 @@ Gemini Flashcards Tutor is a Chrome extension that turns any article, research p
 3. Enable **Developer mode** in the top-right corner.
 4. Click **Load unpacked** and select the `extension/` directory from this project.
 5. The Gemini Flashcards Tutor icon will appear in your toolbar. Pin it for quick access.
+6. Create a file named `.env` inside the `extension/` folder that contains a line like `API_KEY=your_gemini_key_here`. The extension reads this file automatically when generating content.
 
 ## Usage
 
 1. Open a webpage, PDF (viewed in Chrome), or YouTube transcript that you want to study.
 2. (Optional) Highlight a section to prioritize that text. Otherwise the full page will be analysed.
 3. Click the Gemini Flashcards Tutor icon.
-4. Paste your Gemini API key the first time you use the extension—it will be stored in Chrome Sync for future sessions.
-5. Add any focus notes (e.g., “focus on exam-style questions” or “teach this to beginners”).
-6. Choose **Generate Summary**, **Generate Flashcards**, or **Generate Quiz**.
-7. Review the generated study aids directly in the popup and copy them into your notes or study app.
+4. Add your Gemini API key to `extension/.env` before generating, or paste it into the popup for a single session.
+5. Choose **Generate Summary**, **Generate Flashcards**, or **Generate Quiz**.
+6. Review the generated study aids directly in the popup and copy them into your notes or study app.
 
 > **Tip:** If the page is very long, the extension trims the context that is sent to Gemini. You can refine the focus by highlighting the most important section before generating content.
 
