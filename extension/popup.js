@@ -4,7 +4,6 @@ const API_BASE = `https://generativelanguage.googleapis.com/v1beta/models/${MODE
 const MAX_CONTEXT_LENGTH = 6000;
 
 const apiKeyInput = document.getElementById("apiKey");
-const focusInput = document.getElementById("focus");
 const statusEl = document.getElementById("status");
 const contextSection = document.getElementById("contextSection");
 const contextPreview = document.getElementById("contextPreview");
@@ -13,120 +12,97 @@ const resultEl = document.getElementById("result");
 const loadingTemplate = document.getElementById("loadingTemplate");
 
 const actionButtons = Array.from(document.querySelectorAll("button[data-action]"));
-
-const storage = {
-  async get(keys) {
-    return new Promise((resolve, reject) => {
-      try {
-        chrome.storage.sync.get(keys, (result) => {
-          const error = chrome.runtime.lastError;
-          if (error) {
-            reject(new Error(error.message));
-          } else {
-            resolve(result);
-          }
-        });
-      } catch (error) {
-        reject(error);
-      }
-    });
-  },
-  async set(items) {
-    return new Promise((resolve, reject) => {
-      try {
-        chrome.storage.sync.set(items, () => {
-          const error = chrome.runtime.lastError;
-          if (error) {
-            reject(new Error(error.message));
-          } else {
-            resolve();
-          }
-        });
-      } catch (error) {
-        reject(error);
-      }
-    });
-  },
-};
+let envApiKeyPromise;
 
 init();
 
-function init() {
-  restoreSettings();
-  // Attempt to preload API key from .env if present
-  preloadEnvApiKey().catch(() => {
-    // Ignore failures; user can still paste key manually or use stored value
-  });
-  wireAutosave(apiKeyInput, "apiKey");
-  wireAutosave(focusInput, "focusPreferences");
-
+async function init() {
   actionButtons.forEach((button) => {
     button.addEventListener("click", () => handleGenerate(button.dataset.action));
   });
 
-  setStatus("Ready when you are! Highlight text for a tighter focus.");
-}
-
-async function restoreSettings() {
   try {
-    const stored = await storage.get(["apiKey", "focusPreferences"]);
-    if (stored.apiKey) {
-      apiKeyInput.value = stored.apiKey;
+    const envKey = await getEnvApiKey();
+    if (envKey && apiKeyInput) {
+      apiKeyInput.placeholder = "Using key from extension/.env (override by typing)";
     }
-    if (stored.focusPreferences) {
-      focusInput.value = stored.focusPreferences;
+
+    if (envKey) {
+      setStatus("Ready when you are! Highlight text for a tighter focus.");
+    } else {
+      setStatus("Add your Gemini API key in extension/.env or paste it above before generating.");
     }
   } catch (error) {
-    console.warn("Unable to restore settings", error);
+    console.warn("Unable to load .env", error);
+    setStatus("Ready when you are! Highlight text for a tighter focus.");
   }
 }
 
-async function preloadEnvApiKey() {
+async function getEnvApiKey() {
+  if (!envApiKeyPromise) {
+    envApiKeyPromise = fetchEnvApiKey();
+  }
+  return envApiKeyPromise;
+}
+
+async function fetchEnvApiKey() {
   try {
     const envUrl = chrome.runtime.getURL(".env");
     const res = await fetch(envUrl, { cache: "no-store" });
-    if (!res.ok) return;
-    const text = await res.text();
-    const match = text.match(/^(?:GEMINI_|API_)?KEY\s*=\s*(.+)$/m) || text.match(/^API_KEY\s*=\s*(.+)$/m);
-    const value = match ? match[1].trim() : "";
-    if (value && !apiKeyInput.value) {
-      apiKeyInput.value = value;
-      await storage.set({ apiKey: value });
+    if (!res.ok) {
+      return "";
     }
-  } catch (e) {
-    // noop
+
+    const text = await res.text();
+    return parseApiKeyFromEnv(text);
+  } catch (error) {
+    console.warn("Failed to read extension/.env", error);
+    return "";
   }
 }
 
-function wireAutosave(input, key) {
-  let timeoutId;
-  const persist = () => {
-    const value = input.value.trim();
-    storage.set({ [key]: value }).catch((error) => {
-      console.warn(`Failed to save ${key}`, error);
-    });
-  };
+function parseApiKeyFromEnv(text) {
+  const lines = text.split(/\r?\n/);
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) {
+      continue;
+    }
 
-  input.addEventListener("change", persist);
-  input.addEventListener("blur", persist);
-  input.addEventListener("input", () => {
-    clearTimeout(timeoutId);
-    timeoutId = setTimeout(persist, 400);
-  });
+    const match = line.match(/^(?:GEMINI_(?:API_)?KEY|API_KEY|KEY)\s*=\s*(.+)$/i);
+    if (!match) {
+      continue;
+    }
+
+    let value = match[1].trim();
+    value = value.replace(/^['"]|['"]$/g, "");
+    return value;
+  }
+
+  return "";
+}
+
+async function resolveApiKey() {
+  const manualValue = apiKeyInput?.value.trim();
+  if (manualValue) {
+    return manualValue;
+  }
+
+  const envKey = await getEnvApiKey();
+  return envKey?.trim() ?? "";
 }
 
 async function handleGenerate(action) {
-  const apiKey = apiKeyInput.value.trim();
+  const apiKey = await resolveApiKey();
   if (!apiKey) {
     setStatus("Add your Gemini API key to get started.", { error: true });
-    apiKeyInput.focus();
+    apiKeyInput?.focus();
     return;
   }
 
   try {
     setButtonsDisabled(true);
     setStatus("Collecting the page context...", { loading: true });
-    const focus = focusInput.value.trim();
     const contextInfo = await collectPageContext();
 
     if (!contextInfo.text) {
@@ -136,7 +112,7 @@ async function handleGenerate(action) {
     showContext(contextInfo);
 
     setStatus("Talking with Gemini Flash...", { loading: true });
-    const prompt = buildPrompt(action, contextInfo, focus);
+    const prompt = buildPrompt(action, contextInfo);
     const output = await callGemini(apiKey, prompt);
     showResult(output);
     setStatus("Done! Review the study material below.");
@@ -235,9 +211,8 @@ function showResult(output) {
   resultSection.hidden = false;
 }
 
-function buildPrompt(action, contextInfo, focus) {
+function buildPrompt(action, contextInfo) {
   const { text, truncated, usedSelection } = contextInfo;
-  const focusLine = focus ? `\nLearner goals or focus areas: ${focus}` : "";
   const selectionNote = usedSelection
     ? "\nThe learner highlighted specific text. Prioritize the highlighted material while still using broader context when relevant."
     : "";
@@ -268,7 +243,7 @@ Include a one-sentence explanation after each answer to reinforce learning.`;
   }
 
   return `You are Gemini Flashcards Tutor, an expert AI study assistant powered by Google Gemini Flash 2.0.
-Use the context provided to craft the requested study aid.${selectionNote}${truncationNote}${focusLine}
+Use the context provided to craft the requested study aid.${selectionNote}${truncationNote}
 
 Context:
 """
@@ -308,7 +283,7 @@ async function callGemini(apiKey, prompt) {
     .trim();
 
   if (!text) {
-    throw new Error("Gemini returned an empty response. Try again or refine your focus notes.");
+    throw new Error("Gemini returned an empty response. Try again or adjust the highlighted content.");
   }
 
   return text;
