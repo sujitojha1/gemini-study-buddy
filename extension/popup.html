@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gemini Flashcards Tutor</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Gemini Flashcards Tutor</h1>
+      <p class="tagline">Generate summaries, flashcards, and quizzes from any page.</p>
+    </header>
+
+    <section class="section">
+      <label class="field-label" for="apiKey">Gemini API key</label>
+      <input
+        id="apiKey"
+        type="password"
+        placeholder="Paste your Google AI Studio API key"
+        autocomplete="off"
+      />
+      <p class="hint">Stored locally with chrome.storage.sync.</p>
+    </section>
+
+    <section class="section">
+      <label class="field-label" for="focus">Focus areas (optional)</label>
+      <textarea
+        id="focus"
+        rows="2"
+        placeholder="Key topics, exam goals, or the audience you want to study for"
+      ></textarea>
+    </section>
+
+    <section class="actions section">
+      <button id="summaryBtn" data-action="summary">Generate Summary</button>
+      <button id="flashcardBtn" data-action="flashcards">Generate Flashcards</button>
+      <button id="quizBtn" data-action="quiz">Generate Quiz</button>
+    </section>
+
+    <section class="section" id="status" role="status"></section>
+
+    <section class="section" id="contextSection" hidden>
+      <h2>Context extracted from the page</h2>
+      <pre id="contextPreview"></pre>
+    </section>
+
+    <section class="section" id="resultSection" hidden>
+      <h2>Gemini output</h2>
+      <div id="result"></div>
+    </section>
+
+    <template id="loadingTemplate">
+      <div class="spinner" aria-hidden="true"></div>
+      <span>Asking Gemini...</span>
+    </template>
+
+    <script src="popup.js" type="module"></script>
+  </body>
+</html>
