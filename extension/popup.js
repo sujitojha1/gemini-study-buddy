@@ -53,6 +53,10 @@ init();
 
 function init() {
   restoreSettings();
+  // Attempt to preload API key from .env if present
+  preloadEnvApiKey().catch(() => {
+    // Ignore failures; user can still paste key manually or use stored value
+  });
   wireAutosave(apiKeyInput, "apiKey");
   wireAutosave(focusInput, "focusPreferences");
 
@@ -74,6 +78,23 @@ async function restoreSettings() {
     }
   } catch (error) {
     console.warn("Unable to restore settings", error);
+  }
+}
+
+async function preloadEnvApiKey() {
+  try {
+    const envUrl = chrome.runtime.getURL(".env");
+    const res = await fetch(envUrl, { cache: "no-store" });
+    if (!res.ok) return;
+    const text = await res.text();
+    const match = text.match(/^(?:GEMINI_|API_)?KEY\s*=\s*(.+)$/m) || text.match(/^API_KEY\s*=\s*(.+)$/m);
+    const value = match ? match[1].trim() : "";
+    if (value && !apiKeyInput.value) {
+      apiKeyInput.value = value;
+      await storage.set({ apiKey: value });
+    }
+  } catch (e) {
+    // noop
   }
 }
 
