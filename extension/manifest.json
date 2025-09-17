@@ -13,15 +13,5 @@
   "action": {
     "default_title": "Gemini Flashcards Tutor",
     "default_popup": "popup.html"
-  },
-  "web_accessible_resources": [
-    {
-      "resources": [
-        ".env"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
-    }
-  ]
+  }
 }

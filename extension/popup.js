@@ -4,6 +4,8 @@ const API_BASE = `https://generativelanguage.googleapis.com/v1beta/models/${MODE
 const MAX_CONTEXT_LENGTH = 6000;
 
 const statusEl = document.getElementById("status");
+const apiKeyInput = document.getElementById("apiKeyInput");
+const apiKeyButton = document.getElementById("apiKeyButton");
 const contextSection = document.getElementById("contextSection");
 const contextPreview = document.getElementById("contextPreview");
 const resultSection = document.getElementById("resultSection");
@@ -11,7 +13,9 @@ const resultEl = document.getElementById("result");
 const loadingTemplate = document.getElementById("loadingTemplate");
 
 const actionButtons = Array.from(document.querySelectorAll("button[data-action]"));
-let envApiKeyPromise;
+const KEY_PLACEHOLDER_DEFAULT = apiKeyInput?.getAttribute("placeholder") ?? "Paste your Gemini API key";
+const KEY_PLACEHOLDER_LOADED = "API key loaded. Paste a new key to replace it.";
+let cachedApiKey = "";
 
 init();
 
@@ -20,72 +24,29 @@ async function init() {
     button.addEventListener("click", () => handleGenerate(button.dataset.action));
   });
 
-  try {
-    const envKey = await getEnvApiKey();
-    if (envKey) {
-      setStatus("Ready! Your Gemini key was loaded from extension/.env. Highlight text for a tighter focus.");
-    } else {
-      setStatus("Add your Gemini API key to extension/.env before generating.");
-    }
-  } catch (error) {
-    console.warn("Unable to load .env", error);
-    setStatus("Ready when you are! Highlight text for a tighter focus.");
-  }
-}
-
-async function getEnvApiKey() {
-  if (!envApiKeyPromise) {
-    envApiKeyPromise = fetchEnvApiKey();
-  }
-  return envApiKeyPromise;
-}
-
-async function fetchEnvApiKey() {
-  try {
-    const envUrl = chrome.runtime.getURL(".env");
-    const res = await fetch(envUrl, { cache: "no-store" });
-    if (!res.ok) {
-      return "";
-    }
-
-    const text = await res.text();
-    return parseApiKeyFromEnv(text);
-  } catch (error) {
-    console.warn("Failed to read extension/.env", error);
-    return "";
-  }
-}
-
-function parseApiKeyFromEnv(text) {
-  const lines = text.split(/\r?\n/);
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) {
-      continue;
-    }
-
-    const match = line.match(/^(?:GEMINI_(?:API_)?KEY|API_KEY|KEY)\s*=\s*(.+)$/i);
-    if (!match) {
-      continue;
-    }
-
-    let value = match[1].trim();
-    value = value.replace(/^['"]|['"]$/g, "");
-    return value;
+  if (apiKeyButton && apiKeyInput) {
+    apiKeyButton.addEventListener("click", handleApiKeySubmit);
+    apiKeyInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        handleApiKeySubmit();
+      }
+    });
+    apiKeyInput.addEventListener("input", handleApiKeyTyping);
+    markKeyLoaded(false);
   }
 
-  return "";
+  setStatus("Paste your Gemini API key and click Load key to get started.");
 }
 
 async function resolveApiKey() {
-  const envKey = await getEnvApiKey();
-  return envKey?.trim() ?? "";
+  return cachedApiKey.trim();
 }
 
 async function handleGenerate(action) {
   const apiKey = await resolveApiKey();
   if (!apiKey) {
-    setStatus("Add your Gemini API key to extension/.env to get started.", { error: true });
+    setStatus("Paste your Gemini API key and click Load key to get started.", { error: true });
     return;
   }
 
@@ -111,6 +72,56 @@ async function handleGenerate(action) {
     setStatus(message, { error: true });
   } finally {
     setButtonsDisabled(false);
+  }
+}
+
+function handleApiKeySubmit() {
+  if (!apiKeyInput) {
+    return;
+  }
+
+  const value = apiKeyInput.value.trim();
+  if (!value) {
+    setStatus("Paste your Gemini API key first.", { error: true });
+    apiKeyInput.focus();
+    return;
+  }
+
+  setApiKey(value);
+  apiKeyInput.value = "";
+  markKeyLoaded(true);
+  setStatus("Gemini key loaded! Highlight text for a tighter focus.");
+}
+
+function handleApiKeyTyping() {
+  if (!apiKeyInput) {
+    return;
+  }
+
+  const hasValue = apiKeyInput.value.length > 0;
+
+  if (hasValue) {
+    markKeyLoaded(false);
+  } else {
+    markKeyLoaded(Boolean(cachedApiKey));
+  }
+}
+
+function setApiKey(value) {
+  cachedApiKey = value;
+}
+
+function markKeyLoaded(loaded) {
+  if (!apiKeyInput) {
+    return;
+  }
+
+  if (loaded) {
+    apiKeyInput.setAttribute("data-loaded", "true");
+    apiKeyInput.placeholder = KEY_PLACEHOLDER_LOADED;
+  } else {
+    apiKeyInput.removeAttribute("data-loaded");
+    apiKeyInput.placeholder = KEY_PLACEHOLDER_DEFAULT;
   }
 }
 

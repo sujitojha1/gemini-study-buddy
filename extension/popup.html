@@ -11,8 +11,23 @@
       <header class="hero">
         <h1>Gemini Flashcards Tutor</h1>
         <p class="tagline">Generate summaries, flashcards, and quizzes from any page.</p>
-        <p class="hint hint-inline">The extension reads your Gemini API key from <code>extension/.env</code>.</p>
+        <p class="hint hint-inline">Paste your Gemini API key below when you're ready to generate.</p>
       </header>
+
+      <section class="section" id="keySection" aria-labelledby="apiKeyLabel">
+        <label class="hint" id="apiKeyLabel" for="apiKeyInput">Your key stays on this device and isn't stored after you close the popup.</label>
+        <div class="key-input">
+          <input
+            id="apiKeyInput"
+            type="password"
+            placeholder="Paste your Gemini API key"
+            autocomplete="off"
+            spellcheck="false"
+            aria-describedby="apiKeyLabel"
+          />
+          <button id="apiKeyButton" class="compact" type="button">Load key</button>
+        </div>
+      </section>
 
       <section class="section" id="status" role="status"></section>
 

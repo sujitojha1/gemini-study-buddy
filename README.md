@@ -7,7 +7,7 @@ Gemini Flashcards Tutor is a Chrome extension that turns any article, research p
 - **One-click summaries** – distill complex pages into digestible bullet points and actionable takeaways.
 - **AI-generated flashcards** – create 6-10 question/answer pairs in Markdown that you can copy into your favourite spaced repetition tool.
 - **Quick quizzes** – produce five multiple-choice questions with explanations to reinforce understanding.
-- **Environment-based API key** – keep your Gemini API key in `extension/.env` or paste it at runtime; the extension never stores it in Chrome Sync.
+- **In-popup API key entry** – paste your Gemini API key directly into the popup; it only lives for the current session and never leaves your device.
 
 ## Requirements
 
@@ -21,14 +21,14 @@ Gemini Flashcards Tutor is a Chrome extension that turns any article, research p
 3. Enable **Developer mode** in the top-right corner.
 4. Click **Load unpacked** and select the `extension/` directory from this project.
 5. The Gemini Flashcards Tutor icon will appear in your toolbar. Pin it for quick access.
-6. Create a file named `.env` inside the `extension/` folder that contains a line like `API_KEY=your_gemini_key_here`. The extension reads this file automatically when generating content.
+6. Open the extension popup and paste your Gemini API key when prompted. The key is only used locally while the popup remains open.
 
 ## Usage
 
 1. Open a webpage, PDF (viewed in Chrome), or YouTube transcript that you want to study.
 2. (Optional) Highlight a section to prioritize that text. Otherwise the full page will be analysed.
 3. Click the Gemini Flashcards Tutor icon.
-4. Add your Gemini API key to `extension/.env` before generating, or paste it into the popup for a single session.
+4. Paste your Gemini API key into the popup and click **Load key**. The key is kept in-memory only for that session.
 5. Choose **Generate Summary**, **Generate Flashcards**, or **Generate Quiz**.
 6. Review the generated study aids directly in the popup and copy them into your notes or study app.
 
