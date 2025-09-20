@@ -22,6 +22,12 @@ async function init() {
 }
 
 async function handleGenerate(action) {
+  if (action !== "flashcards") {
+    console.error(`Unsupported action requested: ${action}`);
+    setStatus("This action is no longer available.", { error: true });
+    return;
+  }
+
   try {
     setButtonsDisabled(true);
     setStatus("Collecting the page context...", { loading: true });
@@ -35,10 +41,7 @@ async function handleGenerate(action) {
     const prompt = buildPrompt(action, contextInfo);
     const output = await callGemini(prompt);
     showResult(output, action);
-    const doneMessage = action === "flashcards"
-      ? "Cards ready! Click a card to reveal the answer."
-      : "Done! Review the study material below.";
-    setStatus(doneMessage);
+    setStatus("Cards ready! Click a card to reveal the answer.");
   } catch (error) {
     console.error(error);
     const message = error?.message || "Something went wrong while generating.";
@@ -135,21 +138,13 @@ function buildPrompt(action, contextInfo) {
     ? "\nThe context was truncated for length. Respond using only the provided portion."
     : "";
 
-  let task;
-  switch (action) {
-    case "flashcards":
-      task = `Produce 6-10 concise flashcards formatted as Markdown.
+  if (action !== "flashcards") {
+    throw new Error("Unsupported action requested.");
+  }
+
+  const task = `Produce 6-10 concise flashcards formatted as Markdown.
 For each card write a bold question line followed by an indented answer line that learners can quickly review.
 Vary between concept, definition, and application questions.`;
-      break;
-    case "quiz":
-      task = `Generate a short self-check quiz in Markdown with 5 multiple-choice questions.
-For each question provide four answer options labeled A-D and mark the correct answer on a new line starting with "Answer:".
-Include a one-sentence explanation after each answer to reinforce learning.`;
-      break;
-    default:
-      throw new Error("Unsupported action requested.");
-  }
 
   return `You are Gemini Study Buddy, an expert AI study assistant powered by Google Gemini Flash 2.0.
 Use the context provided to craft the requested study aid.${selectionNote}${truncationNote}
@@ -224,10 +219,6 @@ function renderFlashcards(cards) {
 
   const dots = document.createElement("div");
   dots.className = "flashcard-dots";
-
-  const meta = document.createElement("div");
-  meta.className = "flashcard-meta";
-  meta.setAttribute("aria-live", "polite");
 
   const card = document.createElement("button");
   card.type = "button";
@@ -325,7 +316,6 @@ function renderFlashcards(cards) {
 
     prevButton.disabled = index === 0;
     nextButton.disabled = index === cards.length - 1;
-    meta.textContent = `Card ${index + 1} of ${cards.length}`;
   };
 
   cards.forEach((_, index) => {
@@ -362,7 +352,6 @@ function renderFlashcards(cards) {
   controls.appendChild(dots);
   controls.appendChild(nextButton);
 
-  carousel.appendChild(meta);
   carousel.appendChild(controls);
   carousel.appendChild(card);
 
