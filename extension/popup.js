@@ -5,18 +5,11 @@ const LOCAL_GENERATE_ENDPOINT = `${LOCAL_API_BASE}/generate`;
 const MAX_CONTEXT_LENGTH = 6000;
 
 const statusEl = document.getElementById("status");
-const apiKeyInput = document.getElementById("apiKeyInput");
-const apiKeyButton = document.getElementById("apiKeyButton");
-const contextSection = document.getElementById("contextSection");
-const contextPreview = document.getElementById("contextPreview");
 const resultSection = document.getElementById("resultSection");
 const resultEl = document.getElementById("result");
 const loadingTemplate = document.getElementById("loadingTemplate");
 
 const actionButtons = Array.from(document.querySelectorAll("button[data-action]"));
-const KEY_PLACEHOLDER_DEFAULT = apiKeyInput?.getAttribute("placeholder") ?? "Paste your Gemini API key";
-const KEY_PLACEHOLDER_LOADED = "API key loaded. Paste a new key to replace it.";
-let cachedApiKey = "";
 
 init();
 
@@ -25,32 +18,10 @@ async function init() {
     button.addEventListener("click", () => handleGenerate(button.dataset.action));
   });
 
-  if (apiKeyButton && apiKeyInput) {
-    apiKeyButton.addEventListener("click", handleApiKeySubmit);
-    apiKeyInput.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        handleApiKeySubmit();
-      }
-    });
-    apiKeyInput.addEventListener("input", handleApiKeyTyping);
-    markKeyLoaded(false);
-  }
-
-  setStatus("Paste your Gemini API key and click Load key to get started.");
-}
-
-async function resolveApiKey() {
-  return cachedApiKey.trim();
+  setStatus("Highlight what matters or just run it on the full page.");
 }
 
 async function handleGenerate(action) {
-  const apiKey = await resolveApiKey();
-  if (!apiKey) {
-    setStatus("Paste your Gemini API key and click Load key to get started.", { error: true });
-    return;
-  }
-
   try {
     setButtonsDisabled(true);
     setStatus("Collecting the page context...", { loading: true });
@@ -60,11 +31,9 @@ async function handleGenerate(action) {
       throw new Error("Couldn't read any text on this page. Try selecting the content first.");
     }
 
-    showContext(contextInfo);
-
-    setStatus("Talking with Gemini Flash...", { loading: true });
+    setStatus("Talking with Gemini...", { loading: true });
     const prompt = buildPrompt(action, contextInfo);
-    const output = await callGemini(apiKey, prompt);
+    const output = await callGemini(prompt);
     showResult(output);
     setStatus("Done! Review the study material below.");
   } catch (error) {
@@ -73,56 +42,6 @@ async function handleGenerate(action) {
     setStatus(message, { error: true });
   } finally {
     setButtonsDisabled(false);
-  }
-}
-
-function handleApiKeySubmit() {
-  if (!apiKeyInput) {
-    return;
-  }
-
-  const value = apiKeyInput.value.trim();
-  if (!value) {
-    setStatus("Paste your Gemini API key first.", { error: true });
-    apiKeyInput.focus();
-    return;
-  }
-
-  setApiKey(value);
-  apiKeyInput.value = "";
-  markKeyLoaded(true);
-  setStatus("Gemini key loaded! Highlight text for a tighter focus.");
-}
-
-function handleApiKeyTyping() {
-  if (!apiKeyInput) {
-    return;
-  }
-
-  const hasValue = apiKeyInput.value.length > 0;
-
-  if (hasValue) {
-    markKeyLoaded(false);
-  } else {
-    markKeyLoaded(Boolean(cachedApiKey));
-  }
-}
-
-function setApiKey(value) {
-  cachedApiKey = value;
-}
-
-function markKeyLoaded(loaded) {
-  if (!apiKeyInput) {
-    return;
-  }
-
-  if (loaded) {
-    apiKeyInput.setAttribute("data-loaded", "true");
-    apiKeyInput.placeholder = KEY_PLACEHOLDER_LOADED;
-  } else {
-    apiKeyInput.removeAttribute("data-loaded");
-    apiKeyInput.placeholder = KEY_PLACEHOLDER_DEFAULT;
   }
 }
 
@@ -185,28 +104,6 @@ async function collectPageContext() {
   }
 }
 
-function showContext({ text, truncated, usedSelection }) {
-  if (!text) {
-    contextSection.hidden = true;
-    return;
-  }
-
-  contextPreview.textContent = text;
-  contextSection.hidden = false;
-
-  const heading = contextSection.querySelector("h2");
-  if (heading) {
-    if (usedSelection) {
-      heading.textContent = "Context from your highlighted selection";
-    } else {
-      heading.textContent = "Context extracted from the page";
-    }
-    if (truncated) {
-      heading.textContent += " (truncated)";
-    }
-  }
-}
-
 function showResult(output) {
   resultEl.textContent = output;
   resultSection.hidden = false;
@@ -223,12 +120,6 @@ function buildPrompt(action, contextInfo) {
 
   let task;
   switch (action) {
-    case "summary":
-      task = `Create a study summary that captures the essential ideas, definitions, and cause/effect relationships.
-- Start with a short paragraph that frames the topic.
-- Follow with 3-6 bullet points of key takeaways using plain language.
-- Close with one actionable tip or mnemonic that helps remember the material.`;
-      break;
     case "flashcards":
       task = `Produce 6-10 concise flashcards formatted as Markdown.
 For each card write a bold question line followed by an indented answer line that learners can quickly review.
@@ -240,10 +131,10 @@ For each question provide four answer options labeled A-D and mark the correct a
 Include a one-sentence explanation after each answer to reinforce learning.`;
       break;
     default:
-      task = "Summarize the material in a learner-friendly way.";
+      throw new Error("Unsupported action requested.");
   }
 
-  return `You are Gemini Flashcards Tutor, an expert AI study assistant powered by Google Gemini Flash 2.0.
+  return `You are Gemini Study Buddy, an expert AI study assistant powered by Google Gemini Flash 2.0.
 Use the context provided to craft the requested study aid.${selectionNote}${truncationNote}
 
 Context:
@@ -255,7 +146,7 @@ Task:
 ${task}`;
 }
 
-async function callGemini(apiKey, prompt) {
+async function callGemini(prompt) {
   let response;
   try {
     response = await fetch(LOCAL_GENERATE_ENDPOINT, {
@@ -264,7 +155,6 @@ async function callGemini(apiKey, prompt) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        apiKey,
         prompt,
         model: MODEL,
       }),

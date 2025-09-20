@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Gemini Flashcards Tutor",
+  "name": "Gemini Study Buddy",
   "version": "1.0.0",
-  "description": "Turn any web page into a personalized study guide with summaries, flashcards, and quizzes powered by Google Gemini Flash.",
+  "description": "Turn any web page into flashcards and quizzes powered by Google Gemini.",
   "permissions": [
     "activeTab",
     "scripting"
@@ -18,7 +18,7 @@
     "128": "images/icon128.png"
   },
   "action": {
-    "default_title": "Gemini Flashcards Tutor",
+    "default_title": "Gemini Study Buddy",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "images/icon16.png",

@@ -1,13 +1,13 @@
-# Gemini Flashcards Tutor
+# Gemini Study Buddy
 
-Gemini Flashcards Tutor is a Chrome extension that turns any article, research paper, or video transcript into a personalized study guide powered by Google Gemini Flash 2.0. Highlight the part you care about or let the extension read the entire page to instantly receive summaries, flashcards, and self-check quizzes tailored to your learning goals.
+Gemini Study Buddy is a Chrome extension that turns any article, research paper, or video transcript into tailored study material powered by Google Gemini Flash 2.0. Highlight the part you care about or let the extension read the entire page to instantly receive flashcards and self-check quizzes matched to your learning goals.
 
 ## Features
 
-- **One-click summaries** – distill complex pages into digestible bullet points and actionable takeaways.
 - **AI-generated flashcards** – create 6-10 question/answer pairs in Markdown that you can copy into your favourite spaced repetition tool.
 - **Quick quizzes** – produce five multiple-choice questions with explanations to reinforce understanding.
-- **In-popup API key entry** – paste your Gemini API key directly into the popup; it only lives for the current session and never leaves your device.
+- **Highlight-aware prompts** – emphasise the text you select while still considering the broader context of the page.
+- **Local key storage** – keep your Gemini API key in the FastAPI bridge so the popup never asks for it.
 
 ## Requirements
 
@@ -20,16 +20,15 @@ Gemini Flashcards Tutor is a Chrome extension that turns any article, research p
 2. Open Google Chrome and navigate to `chrome://extensions`.
 3. Enable **Developer mode** in the top-right corner.
 4. Click **Load unpacked** and select the `extension/` directory from this project.
-5. The Gemini Flashcards Tutor icon will appear in your toolbar. Pin it for quick access.
-6. Open the extension popup and paste your Gemini API key when prompted. The key is only used locally while the popup remains open.
+5. The Gemini Study Buddy icon will appear in your toolbar. Pin it for quick access.
 
 ## Usage
 
 1. Open a webpage, PDF (viewed in Chrome), or YouTube transcript that you want to study.
 2. (Optional) Highlight a section to prioritize that text. Otherwise the full page will be analysed.
-3. Click the Gemini Flashcards Tutor icon.
-4. Paste your Gemini API key into the popup and click **Load key**. The key is kept in-memory only for that session.
-5. Choose **Generate Summary**, **Generate Flashcards**, or **Generate Quiz**.
+3. Click the Gemini Study Buddy icon.
+4. Make sure the local FastAPI server (below) is running so the popup can reach Gemini.
+5. Choose **Generate Flashcards** or **Generate Quiz**.
 6. Review the generated study aids directly in the popup and copy them into your notes or study app.
 
 > **Tip:** If the page is very long, the extension trims the context that is sent to Gemini. You can refine the focus by highlighting the most important section before generating content.
@@ -63,8 +62,8 @@ The repository includes a lightweight FastAPI app under `server/` that proxies r
 2. Install dependencies: `pip install -r server/requirements.txt`.
 3. Provide your Gemini key by either exporting `GEMINI_API_KEY` or copying `server/.env.example` to `server/.env` and filling in the value.
 4. Start the server: `uvicorn app:app --reload` (run from the `server/` directory).
-5. Load or reload the Chrome extension. The popup will forward prompts—and any key you paste—to the local service, which then reaches Gemini.
+5. Load or reload the Chrome extension. The popup will forward prompts to the local service, which in turn calls Gemini with the key stored in your environment.
 
 If the extension shows "Could not reach the local Gemini server," make sure the FastAPI process is running and listening on port 8000.
 
-Enjoy faster studying with Gemini Flashcards Tutor! 🚀
+Enjoy faster studying with Gemini Study Buddy! 🚀
