@@ -55,4 +55,16 @@ extension/
 - Responses are rendered as plain text to keep the popup lightweight. Paste them into a Markdown editor for richer formatting.
 - To customize prompts or behaviour, edit `extension/popup.js` and reload the unpacked extension from `chrome://extensions`.
 
+## Local FastAPI bridge
+
+The repository includes a lightweight FastAPI app under `server/` that proxies requests to the Gemini API. Running it locally lets the Chrome extension call `http://127.0.0.1:8000/generate` instead of talking to Gemini directly.
+
+1. Create a virtual environment of your choice inside `server/`.
+2. Install dependencies: `pip install -r server/requirements.txt`.
+3. Provide your Gemini key by either exporting `GEMINI_API_KEY` or copying `server/.env.example` to `server/.env` and filling in the value.
+4. Start the server: `uvicorn app:app --reload` (run from the `server/` directory).
+5. Load or reload the Chrome extension. The popup will forward prompts—and any key you paste—to the local service, which then reaches Gemini.
+
+If the extension shows "Could not reach the local Gemini server," make sure the FastAPI process is running and listening on port 8000.
+
 Enjoy faster studying with Gemini Flashcards Tutor! 🚀

@@ -1,5 +1,6 @@
 const MODEL = "gemini-2.0-flash";
-const API_BASE = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+const LOCAL_API_BASE = "http://127.0.0.1:8000";
+const LOCAL_GENERATE_ENDPOINT = `${LOCAL_API_BASE}/generate`;
 
 const MAX_CONTEXT_LENGTH = 6000;
 
@@ -255,35 +256,35 @@ ${task}`;
 }
 
 async function callGemini(apiKey, prompt) {
-  const response = await fetch(`${API_BASE}?key=${encodeURIComponent(apiKey)}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: prompt }],
-        },
-      ],
-    }),
-  });
+  let response;
+  try {
+    response = await fetch(LOCAL_GENERATE_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        apiKey,
+        prompt,
+        model: MODEL,
+      }),
+    });
+  } catch (error) {
+    console.error("Local API network failure", error);
+    throw new Error("Could not reach the local Gemini server. Start the FastAPI app and try again.");
+  }
 
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    const errorMessage = payload?.error?.message || `Gemini API error (${response.status})`;
+    const errorMessage = payload?.detail || `Local API error (${response.status})`;
     throw new Error(errorMessage);
   }
 
-  const text = payload?.candidates?.[0]?.content?.parts
-    ?.map((part) => part?.text ?? "")
-    .join("")
-    .trim();
+  const text = payload?.output?.trim?.();
 
   if (!text) {
-    throw new Error("Gemini returned an empty response. Try again or adjust the highlighted content.");
+    throw new Error("Local API returned an empty response. Check the FastAPI logs and try again.");
   }
 
   return text;
