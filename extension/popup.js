@@ -225,29 +225,97 @@ function renderFlashcards(cards) {
   const dots = document.createElement("div");
   dots.className = "flashcard-dots";
 
+  const meta = document.createElement("div");
+  meta.className = "flashcard-meta";
+  meta.setAttribute("aria-live", "polite");
+
   const card = document.createElement("button");
   card.type = "button";
   card.className = "flashcard";
   card.setAttribute("aria-pressed", "false");
+  card.setAttribute("aria-label", "Flip flashcard to reveal the answer");
 
   const dotButtons = [];
 
+  const createFaceContent = (face, labelText, lines) => {
+    face.innerHTML = "";
+
+    const label = document.createElement("span");
+    label.className = "flashcard-label";
+    label.textContent = labelText;
+    face.appendChild(label);
+
+    const body = document.createElement("div");
+    body.className = "flashcard-body";
+    face.appendChild(body);
+
+    const hasLines = Array.isArray(lines) && lines.length > 0;
+    const contentLines = hasLines ? lines : ["No content provided."];
+
+    let currentList = null;
+    contentLines.forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        currentList = null;
+        const spacer = document.createElement("div");
+        spacer.className = "flashcard-body-spacer";
+        body.appendChild(spacer);
+        return;
+      }
+
+      const bulletMatch = trimmed.match(/^•\s*(.+)$/);
+      if (bulletMatch) {
+        if (!currentList) {
+          currentList = document.createElement("ul");
+          body.appendChild(currentList);
+        }
+        const item = document.createElement("li");
+        item.textContent = bulletMatch[1].trim();
+        currentList.appendChild(item);
+        return;
+      }
+
+      currentList = null;
+      const paragraph = document.createElement("p");
+      paragraph.textContent = trimmed;
+      body.appendChild(paragraph);
+    });
+  };
+
   const updateCard = (index) => {
     currentIndex = index;
-    const { question, answer } = cards[index];
-    const questionHtml = escapeHtml(question).replace(/\n/g, "<br />");
-    const answerHtml = escapeHtml(answer)
-      .replace(/\n{2,}/g, "<br /><br />")
-      .replace(/\n/g, "<br />");
+    const { question, answer, answerLines } = cards[index];
+
+    const questionLines = question
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    const answerContent = Array.isArray(answerLines)
+      ? answerLines
+      : answer
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean);
 
     card.classList.remove("is-flipped");
     card.setAttribute("aria-pressed", "false");
-    card.innerHTML = `
-      <div class="flashcard-inner">
-        <div class="flashcard-face flashcard-front">${questionHtml}</div>
-        <div class="flashcard-face flashcard-back">${answerHtml}</div>
-      </div>
-    `;
+    card.innerHTML = "";
+
+    const inner = document.createElement("div");
+    inner.className = "flashcard-inner";
+
+    const frontFace = document.createElement("div");
+    frontFace.className = "flashcard-face flashcard-front";
+    createFaceContent(frontFace, "Question", questionLines.length ? questionLines : [question || "Untitled question"]);
+
+    const backFace = document.createElement("div");
+    backFace.className = "flashcard-face flashcard-back";
+    createFaceContent(backFace, "Answer", answerContent.length ? answerContent : ["No answer provided."]);
+
+    inner.appendChild(frontFace);
+    inner.appendChild(backFace);
+    card.appendChild(inner);
 
     dotButtons.forEach((dot, dotIndex) => {
       const isActive = dotIndex === index;
@@ -257,6 +325,7 @@ function renderFlashcards(cards) {
 
     prevButton.disabled = index === 0;
     nextButton.disabled = index === cards.length - 1;
+    meta.textContent = `Card ${index + 1} of ${cards.length}`;
   };
 
   cards.forEach((_, index) => {
@@ -293,6 +362,7 @@ function renderFlashcards(cards) {
   controls.appendChild(dots);
   controls.appendChild(nextButton);
 
+  carousel.appendChild(meta);
   carousel.appendChild(controls);
   carousel.appendChild(card);
 
@@ -311,10 +381,29 @@ function parseFlashcards(markdown) {
     if (!currentQuestion) {
       return;
     }
-    const answerText = answerLines.join("\n").trim();
+    const compactLines = answerLines
+      .map((line) => line.trim())
+      .filter((line, index, array) => {
+        if (!line && index > 0 && array[index - 1] === "") {
+          return false;
+        }
+        return true;
+      });
+
+    while (compactLines.length && compactLines[0] === "") {
+      compactLines.shift();
+    }
+    while (compactLines.length && compactLines[compactLines.length - 1] === "") {
+      compactLines.pop();
+    }
+    const answerText = compactLines.join("\n").trim();
+    const fallback = answerText || "No answer provided.";
+    const linesForFace = compactLines.length > 0 ? compactLines : [fallback];
+
     cards.push({
       question: currentQuestion,
-      answer: answerText || "No answer provided.",
+      answer: fallback,
+      answerLines: linesForFace,
     });
     currentQuestion = null;
     answerLines = [];
@@ -348,12 +437,6 @@ function parseFlashcards(markdown) {
   flush();
 
   return cards;
-}
-
-function escapeHtml(text) {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
 }
 
 function cleanQuestion(text) {
