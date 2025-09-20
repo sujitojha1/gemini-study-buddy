@@ -34,8 +34,11 @@ async function handleGenerate(action) {
     setStatus("Talking with Gemini...", { loading: true });
     const prompt = buildPrompt(action, contextInfo);
     const output = await callGemini(prompt);
-    showResult(output);
-    setStatus("Done! Review the study material below.");
+    showResult(output, action);
+    const doneMessage = action === "flashcards"
+      ? "Cards ready! Click a card to reveal the answer."
+      : "Done! Review the study material below.";
+    setStatus(doneMessage);
   } catch (error) {
     console.error(error);
     const message = error?.message || "Something went wrong while generating.";
@@ -104,8 +107,22 @@ async function collectPageContext() {
   }
 }
 
-function showResult(output) {
-  resultEl.textContent = output;
+function showResult(output, action) {
+  resultEl.innerHTML = "";
+  resultEl.classList.remove("has-flashcards");
+
+  if (action === "flashcards") {
+    const cards = parseFlashcards(output);
+    if (cards.length > 0) {
+      resultEl.classList.add("has-flashcards");
+      renderFlashcards(cards);
+    } else {
+      resultEl.textContent = output;
+    }
+  } else {
+    resultEl.textContent = output;
+  }
+
   resultSection.hidden = false;
 }
 
@@ -178,4 +195,92 @@ async function callGemini(prompt) {
   }
 
   return text;
+}
+
+function renderFlashcards(cards) {
+  const grid = document.createElement("div");
+  grid.className = "flashcard-grid";
+
+  cards.forEach(({ question, answer }) => {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "flashcard";
+    card.setAttribute("aria-pressed", "false");
+
+    const questionHtml = escapeHtml(question).replace(/\n/g, "<br />");
+    const answerHtml = escapeHtml(answer)
+      .replace(/\n{2,}/g, "<br /><br />")
+      .replace(/\n/g, "<br />");
+
+    card.innerHTML = `
+      <div class="flashcard-inner">
+        <div class="flashcard-face flashcard-front">${questionHtml}</div>
+        <div class="flashcard-face flashcard-back">${answerHtml}</div>
+      </div>
+    `;
+    card.addEventListener("click", () => {
+      card.classList.toggle("is-flipped");
+      card.setAttribute("aria-pressed", card.classList.contains("is-flipped") ? "true" : "false");
+    });
+
+    grid.appendChild(card);
+  });
+
+  resultEl.appendChild(grid);
+}
+
+function parseFlashcards(markdown) {
+  const lines = markdown.split(/\r?\n/);
+  const cards = [];
+
+  let currentQuestion = null;
+  let answerLines = [];
+
+  const flush = () => {
+    if (!currentQuestion) {
+      return;
+    }
+    const answerText = answerLines.join("\n").trim();
+    cards.push({
+      question: currentQuestion,
+      answer: answerText || "No answer provided.",
+    });
+    currentQuestion = null;
+    answerLines = [];
+  };
+
+  lines.forEach((line) => {
+    const questionMatch = line.match(/^\*\*(.+?)\*\*/);
+    if (questionMatch) {
+      if (currentQuestion) {
+        flush();
+      }
+      currentQuestion = questionMatch[1].trim();
+      answerLines = [];
+      return;
+    }
+
+    if (currentQuestion) {
+      if (line.trim() === "") {
+        if (answerLines.length > 0) {
+          answerLines.push("");
+        }
+        return;
+      }
+
+      const trimmed = line.trim();
+      const normalized = trimmed.replace(/^[-*]\s+/, "• ");
+      answerLines.push(normalized);
+    }
+  });
+
+  flush();
+
+  return cards;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
 }
