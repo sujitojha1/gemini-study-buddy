@@ -149,6 +149,16 @@ h2 {
   font-size: 0.9rem;
 }
 
+#resultSection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#resultSection > h2 {
+  margin-bottom: 0;
+}
+
 #result.has-flashcards {
   padding: 0;
   border: none;
@@ -157,12 +167,17 @@ h2 {
   white-space: normal;
   max-height: none;
   overflow: visible;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 280px;
 }
 
 .flashcard-carousel {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  flex: 1;
 }
 
 .flashcard-controls {
@@ -237,10 +252,12 @@ h2 {
   perspective: 1000px;
   border-radius: 18px;
   cursor: pointer;
-  min-height: 180px;
   width: 100%;
   display: block;
   color: var(--fg);
+  flex: 1;
+  height: 100%;
+  min-height: clamp(220px, 45vh, 340px);
 }
 
 .flashcard:focus-visible {
