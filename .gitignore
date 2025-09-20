@@ -1,2 +1,3 @@
 extension/.env
 .DS_Store
+server/.env
