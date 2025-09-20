@@ -198,35 +198,106 @@ async function callGemini(prompt) {
 }
 
 function renderFlashcards(cards) {
-  const grid = document.createElement("div");
-  grid.className = "flashcard-grid";
+  if (!cards.length) {
+    return;
+  }
 
-  cards.forEach(({ question, answer }) => {
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = "flashcard";
-    card.setAttribute("aria-pressed", "false");
+  let currentIndex = 0;
 
+  const carousel = document.createElement("div");
+  carousel.className = "flashcard-carousel";
+
+  const controls = document.createElement("div");
+  controls.className = "flashcard-controls";
+
+  const prevButton = document.createElement("button");
+  prevButton.type = "button";
+  prevButton.className = "flashcard-nav flashcard-nav-prev";
+  prevButton.setAttribute("aria-label", "Previous flashcard");
+  prevButton.innerHTML = "&#x2039;";
+
+  const nextButton = document.createElement("button");
+  nextButton.type = "button";
+  nextButton.className = "flashcard-nav flashcard-nav-next";
+  nextButton.setAttribute("aria-label", "Next flashcard");
+  nextButton.innerHTML = "&#x203a;";
+
+  const dots = document.createElement("div");
+  dots.className = "flashcard-dots";
+
+  const card = document.createElement("button");
+  card.type = "button";
+  card.className = "flashcard";
+  card.setAttribute("aria-pressed", "false");
+
+  const dotButtons = [];
+
+  const updateCard = (index) => {
+    currentIndex = index;
+    const { question, answer } = cards[index];
     const questionHtml = escapeHtml(question).replace(/\n/g, "<br />");
     const answerHtml = escapeHtml(answer)
       .replace(/\n{2,}/g, "<br /><br />")
       .replace(/\n/g, "<br />");
 
+    card.classList.remove("is-flipped");
+    card.setAttribute("aria-pressed", "false");
     card.innerHTML = `
       <div class="flashcard-inner">
         <div class="flashcard-face flashcard-front">${questionHtml}</div>
         <div class="flashcard-face flashcard-back">${answerHtml}</div>
       </div>
     `;
-    card.addEventListener("click", () => {
-      card.classList.toggle("is-flipped");
-      card.setAttribute("aria-pressed", card.classList.contains("is-flipped") ? "true" : "false");
+
+    dotButtons.forEach((dot, dotIndex) => {
+      const isActive = dotIndex === index;
+      dot.classList.toggle("is-active", isActive);
+      dot.setAttribute("aria-pressed", isActive ? "true" : "false");
     });
 
-    grid.appendChild(card);
+    prevButton.disabled = index === 0;
+    nextButton.disabled = index === cards.length - 1;
+  };
+
+  cards.forEach((_, index) => {
+    const dot = document.createElement("button");
+    dot.type = "button";
+    dot.className = "flashcard-dot";
+    dot.setAttribute("aria-label", `Go to flashcard ${index + 1}`);
+    dot.setAttribute("aria-pressed", "false");
+    dot.addEventListener("click", () => {
+      updateCard(index);
+    });
+    dots.appendChild(dot);
+    dotButtons.push(dot);
   });
 
-  resultEl.appendChild(grid);
+  prevButton.addEventListener("click", () => {
+    if (currentIndex > 0) {
+      updateCard(currentIndex - 1);
+    }
+  });
+
+  nextButton.addEventListener("click", () => {
+    if (currentIndex < cards.length - 1) {
+      updateCard(currentIndex + 1);
+    }
+  });
+
+  card.addEventListener("click", () => {
+    card.classList.toggle("is-flipped");
+    card.setAttribute("aria-pressed", card.classList.contains("is-flipped") ? "true" : "false");
+  });
+
+  controls.appendChild(prevButton);
+  controls.appendChild(dots);
+  controls.appendChild(nextButton);
+
+  carousel.appendChild(controls);
+  carousel.appendChild(card);
+
+  resultEl.appendChild(carousel);
+  updateCard(0);
 }
 
 function parseFlashcards(markdown) {
@@ -255,7 +326,7 @@ function parseFlashcards(markdown) {
       if (currentQuestion) {
         flush();
       }
-      currentQuestion = questionMatch[1].trim();
+      currentQuestion = cleanQuestion(questionMatch[1].trim());
       answerLines = [];
       return;
     }
@@ -283,4 +354,12 @@ function escapeHtml(text) {
   const div = document.createElement("div");
   div.textContent = text;
   return div.innerHTML;
+}
+
+function cleanQuestion(text) {
+  let cleaned = text;
+  cleaned = cleaned.replace(/^(?:q\d+[:.)-]?\s*)/i, "");
+  cleaned = cleaned.replace(/^\d+\s*[).:-]?\s*/, "");
+  cleaned = cleaned.replace(/^(?:[-*•]\s*)/, "");
+  return cleaned.trim();
 }
