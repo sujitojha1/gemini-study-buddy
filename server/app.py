@@ -172,11 +172,13 @@ async def health() -> dict[str, str]:
     responses={400: {"model": ErrorResponse}, 502: {"model": ErrorResponse}},
 )
 async def generate(request: GenerateRequest) -> GenerateResponse:
+    # Capture a trimmed version of the learner content to keep logs readable.
     request_text = request.webpage_raw_content.strip()
     preview = " ".join(request_text.split())[:160]
     if len(request_text) > 160:
         preview = f"{preview}..."
 
+    # Log a header so each request is easy to spot in the rolling agent history file.
     _log_lines(
         [
             f"{'Gemini Study Buddy Request':^{LOG_LINE_WIDTH}}",
@@ -194,7 +196,7 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
             status_code=400,
             detail="Gemini API key missing. Provide it in the request or set GEMINI_API_KEY.",
         )
-    
+
     model_name = DEFAULT_MODEL
 
     try:
@@ -202,6 +204,7 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Failed to initialize Gemini client: {exc}") from exc
 
+    # `steps` is returned to the client so the UI can display high-level progress.
     steps: list[str] = []
     cards: dict[str, Flashcard] = {}
     summary_text = ""
@@ -211,6 +214,7 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
 
 
     try:
+        # Offload Gemini calls to a worker thread to keep the event loop free for I/O.
         summary_response = await run_in_threadpool(
             client.models.generate_content,
             model=model_name,
@@ -232,7 +236,7 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
             flashcard_count=FLASHCARD_COUNT,
             study_summary=summary_text,
         )
-        
+
 
         flashcard_response = await run_in_threadpool(
             client.models.generate_content,
@@ -265,9 +269,11 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
 
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        # Surface the failure reason to the log before handing control back to FastAPI.
         _log_lines([f"Status: Request failed ({exc.status_code}): {detail}"])
         raise
     except Exception as exc:
+        # Unknown exceptions get logged and wrapped so the client receives a consistent error.
         _log_lines([f"Status: Unexpected error: {exc}"])
         raise HTTPException(status_code=502, detail=f"Gemini request failed: {exc}")
 

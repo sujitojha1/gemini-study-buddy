@@ -1,7 +1,9 @@
+// Local FastAPI endpoint that proxies calls to Gemini.
 const MODEL = "gemini-2.0-flash";
 const LOCAL_API_BASE = "http://127.0.0.1:8000";
 const LOCAL_GENERATE_ENDPOINT = `${LOCAL_API_BASE}/generate`;
 
+// Limit the text we send so the backend stays within model token limits.
 const MAX_CONTEXT_LENGTH = 6000;
 
 const statusEl = document.getElementById("status");
@@ -12,12 +14,14 @@ const flashcardButton = document.getElementById("flashcardBtn");
 
 init();
 
+// Wire up the popup UI once the DOM references are ready.
 function init() {
   flashcardButton.addEventListener("click", handleGenerate);
   setStatus("Highlight what matters or just run it on the full page.");
 }
 
 async function handleGenerate() {
+  // Main workflow: gather context, call the API, and render the cards.
   try {
     setButtonsDisabled(true);
     setStatus("Collecting the page context...", { loading: true });
@@ -64,12 +68,14 @@ function setStatus(message, { loading = false, error = false } = {}) {
 }
 
 async function collectPageContext() {
+  // Find the focused tab so we can inspect its contents.
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) {
     throw new Error("Couldn't find the active tab.");
   }
 
   try {
+    // Run a single isolated script in the page to pull the selection/body text.
     const [injectionResult] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => {
@@ -100,6 +106,7 @@ async function collectPageContext() {
 }
 
 function buildPrompt(contextInfo) {
+  // Construct the instructions the backend forwards to Gemini.
   const { text, truncated, usedSelection } = contextInfo;
   const selectionNote = usedSelection
     ? "\nThe learner highlighted specific text. Prioritize the highlighted material while still using broader context when relevant."
@@ -119,6 +126,7 @@ ${text}
 }
 
 async function callGemini(webpage_raw_content, cardCount) {
+  // Delegate to the FastAPI service; it proxies the Gemini request.
   let response;
   try {
     response = await fetch(LOCAL_GENERATE_ENDPOINT, {
@@ -150,6 +158,7 @@ async function callGemini(webpage_raw_content, cardCount) {
 }
 
 function showResult(payload, contextInfo, cardCount) {
+  // Reset the results pane before rendering the new content.
   resultEl.innerHTML = "";
   resultEl.classList.remove("has-flashcards");
 
@@ -168,6 +177,7 @@ function showResult(payload, contextInfo, cardCount) {
 }
 
 function normalizeFlashcards(cardsObject) {
+  // Transform the keyed object into a clean list the UI can consume.
   if (!cardsObject || typeof cardsObject !== "object") {
     return [];
   }
@@ -182,6 +192,7 @@ function normalizeFlashcards(cardsObject) {
 }
 
 function renderFlashcards(cards) {
+  // Build a simple carousel that flips cards and supports basic navigation.
   if (!cards.length) {
     return;
   }
