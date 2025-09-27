@@ -149,6 +149,27 @@ def _parse_function_call(response_text: str) -> tuple[str, str]:
     return func_name, raw_params
 
 
+def _maybe_parse_json(text: str) -> Any | None:
+    candidate = text.strip()
+    if not candidate:
+        return None
+
+    if candidate.startswith("```"):
+        candidate = candidate[3:]
+        candidate = candidate.lstrip()
+        if candidate.lower().startswith("json"):
+            candidate = candidate[4:]
+        candidate = candidate.lstrip()
+        if candidate.endswith("```"):
+            candidate = candidate[:-3]
+        candidate = candidate.strip()
+
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        return None
+
+
 def _append_history_log(entry: dict[str, Any]) -> None:
     timestamp = entry.get("timestamp") or datetime.utcnow().isoformat() + "Z"
     status = entry.get("status", "unknown")
@@ -361,6 +382,51 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
                     )
 
                 continue
+
+            parsed_json = _maybe_parse_json(normalized)
+            if parsed_json is not None:
+                payloads: list[dict[str, Any]] = []
+                if isinstance(parsed_json, dict):
+                    payloads = [parsed_json]
+                elif isinstance(parsed_json, list):
+                    payloads = [item for item in parsed_json if isinstance(item, dict)]
+
+                processed_any = False
+                for payload in payloads:
+                    try:
+                        formatted = format_flash_card(payload)
+                    except ValueError as exc:
+                        log_lines.append(f"  Parsed JSON flashcard rejected: {exc}")
+                        continue
+
+                    card_counter += 1
+                    card_id = (
+                        payload.get("id")
+                        or payload.get("card_id")
+                        or f"card_{card_counter}"
+                    )
+                    cards[card_id] = Flashcard(**formatted)
+
+                    log_lines.append(
+                        f"  Parsed JSON flashcard -> {card_id}: front='{formatted['front']}' back='{formatted['back']}'"
+                    )
+                    steps.append(
+                        f"Step 2.{iteration + 1}: Stored flashcard {card_id} with front='{formatted['front']}'."
+                    )
+                    history.append(
+                        f"In iteration {iteration + 1}, you provided flashcard {card_id} with front='{formatted['front']}' and back='{formatted['back']}'."
+                    )
+                    processed_any = True
+
+                    if len(cards) >= request.flashcard_count:
+                        break
+
+                if processed_any:
+                    if len(cards) >= request.flashcard_count:
+                        history.append(
+                            "All required flashcards are prepared. Respond with FINAL_JSON to confirm completion."
+                        )
+                    continue
 
             detail_message = "Gemini agent returned an unexpected response format."
             log_lines.append(f"!!! Error: {detail_message}")
