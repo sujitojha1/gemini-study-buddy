@@ -29,6 +29,7 @@ app.add_middleware(
 DEFAULT_MODEL = "gemini-2.0-flash"
 FLASHCARD_COUNT = 5
 LOG_PATH = Path(__file__).resolve().parent / "logs" / f"agent_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+LOG_LINE_WIDTH = 72
 
 SUMMARY_PROMPT_TEMPLATE = (
     "Extract the essential study notes from the following learner request. "
@@ -64,6 +65,19 @@ class GenerateResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     detail: str
+
+
+def _log_lines(lines: list[str], *, header: bool = False) -> None:
+    """Append formatted lines to the request log."""
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with LOG_PATH.open("a", encoding="utf-8") as log_file:
+        if header:
+            separator = "=" * LOG_LINE_WIDTH
+            log_file.write(f"\n{separator}\n")
+        for line in lines:
+            log_file.write(f"{line}\n")
+        if header:
+            log_file.write("=" * LOG_LINE_WIDTH + "\n")
 
 
 @lru_cache(maxsize=4)
@@ -158,7 +172,21 @@ async def health() -> dict[str, str]:
     responses={400: {"model": ErrorResponse}, 502: {"model": ErrorResponse}},
 )
 async def generate(request: GenerateRequest) -> GenerateResponse:
-    api_key =  os.getenv("GEMINI_API_KEY")
+    request_text = request.webpage_raw_content.strip()
+    preview = " ".join(request_text.split())[:160]
+    if len(request_text) > 160:
+        preview = f"{preview}..."
+
+    _log_lines(
+        [
+            f"{'Gemini Study Buddy Request':^{LOG_LINE_WIDTH}}",
+            f"Started: {datetime.now().isoformat()}",
+            f"Preview: {preview}" if preview else "Preview: [empty]",
+        ],
+        header=True,
+    )
+
+    api_key = os.getenv("GEMINI_API_KEY")
     print("stage1")
 
     if not api_key:
@@ -195,7 +223,10 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
             raise HTTPException(status_code=502, detail="Gemini returned an empty study summary.")
 
         summary_text = summary_raw.strip()
-        
+        summary_status = "Status: Study summary received from Gemini."
+        steps.append("Study summary received from Gemini.")
+        _log_lines([summary_status])
+
 
         cards_prompt = FLASHCARD_PROMPT_TEMPLATE.format(
             flashcard_count=FLASHCARD_COUNT,
@@ -225,15 +256,19 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
             for index, card in enumerate(flashcards, start=1)
         }
 
+        cards_status = "Status: Flashcards generated successfully."
+        steps.append("Flashcards generated successfully.")
+        _log_lines([cards_status])
+
         response_payload = GenerateResponse(cards=cards, steps=steps, source_summary=summary_text)
         return response_payload
 
     except HTTPException as exc:
-        print("hi {exc}")
-
+        detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        _log_lines([f"Status: Request failed ({exc.status_code}): {detail}"])
         raise
     except Exception as exc:
-
+        _log_lines([f"Status: Unexpected error: {exc}"])
         raise HTTPException(status_code=502, detail=f"Gemini request failed: {exc}")
 
 
