@@ -289,71 +289,7 @@ function renderFlashcards(cards) {
   updateCard(0);
 }
 
-function renderMetadata(payload, contextInfo, cardCount) {
-  const extras = document.createElement("div");
-  extras.className = "flashcard-meta";
-
-  const summaryText = toCleanString(payload?.source_summary);
-  if (summaryText) {
-    const summaryDetails = document.createElement("details");
-    summaryDetails.className = "flashcard-summary";
-    summaryDetails.open = false;
-
-    const summaryTitle = document.createElement("summary");
-    summaryTitle.textContent = "View study summary";
-
-    const summaryBody = document.createElement("p");
-    summaryBody.textContent = summaryText;
-
-    summaryDetails.appendChild(summaryTitle);
-    summaryDetails.appendChild(summaryBody);
-    extras.appendChild(summaryDetails);
-  }
-
-  if (Array.isArray(payload?.steps) && payload.steps.length) {
-    const stepsDetails = document.createElement("details");
-    stepsDetails.className = "flashcard-steps";
-
-    const stepsTitle = document.createElement("summary");
-    stepsTitle.textContent = "See Gemini steps";
-
-    const stepsList = document.createElement("ol");
-    stepsList.className = "flashcard-step-list";
-
-    payload.steps.forEach((step) => {
-      const li = document.createElement("li");
-      li.textContent = toCleanString(step);
-      stepsList.appendChild(li);
-    });
-
-    stepsDetails.appendChild(stepsTitle);
-    stepsDetails.appendChild(stepsList);
-    extras.appendChild(stepsDetails);
-  }
-
-  const requestedCount = 5;
-  const actualCount = Array.isArray(payload?.cards)
-    ? payload.cards.length
-    : Object.keys(payload?.cards || {}).length;
-
-  const countNote = document.createElement("p");
-  countNote.className = "flashcard-selection-note";
-  countNote.textContent = `Requested ${requestedCount} flashcards; received ${actualCount}.`;
-  extras.appendChild(countNote);
-
-  if (contextInfo?.usedSelection) {
-    const selectionTag = document.createElement("p");
-    selectionTag.className = "flashcard-selection-note";
-    selectionTag.textContent = "Flashcards prioritized your highlighted text.";
-    extras.appendChild(selectionTag);
-  }
-
-  if (!extras.childNodes.length) {
-    return;
-  }
-
-  resultEl.appendChild(extras);
-}
+function renderMetadata() {}
 
 function escapeHtml(text) {
   const div = document.createElement("div");
