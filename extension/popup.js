@@ -9,16 +9,11 @@ const resultSection = document.getElementById("resultSection");
 const resultEl = document.getElementById("result");
 const loadingTemplate = document.getElementById("loadingTemplate");
 const flashcardButton = document.getElementById("flashcardBtn");
-const cardCountInput = document.getElementById("cardCount");
-const cardCountValue = document.getElementById("cardCountValue");
 
 init();
 
 function init() {
   flashcardButton.addEventListener("click", handleGenerate);
-  cardCountInput.addEventListener("input", () => {
-    cardCountValue.textContent = cardCountInput.value;
-  });
   setStatus("Highlight what matters or just run it on the full page.");
 }
 
@@ -34,13 +29,10 @@ async function handleGenerate() {
 
     setStatus("Talking with Gemini...", { loading: true });
     const prompt = buildPrompt(contextInfo);
-    const cardCount = Number(cardCountInput.value) || 0;
+    const cardCount = 5;
     const payload = await callGemini(prompt, cardCount);
     showResult(payload, contextInfo, cardCount);
-    const doneMessage = cardCount === 0
-      ? "Summary ready! No flashcards requested."
-      : "Cards ready! Click a card to reveal the answer.";
-    setStatus(doneMessage);
+    setStatus("Cards ready! Click a card to reveal the answer.");
   } catch (error) {
     console.error(error);
     const message = error?.message || "Something went wrong while generating.";
@@ -165,11 +157,7 @@ function showResult(payload, contextInfo, cardCount) {
 
   const cards = normalizeFlashcards(payload?.cards);
   if (!cards.length) {
-    if (cardCount === 0) {
-      resultEl.textContent = "Flashcards were skipped. Review the study summary below.";
-    } else {
-      resultEl.textContent = "Gemini did not return any flashcards. Try again with a smaller selection.";
-    }
+    resultEl.textContent = "Gemini did not return any flashcards. Try again with a smaller selection.";
     resultSection.hidden = false;
     renderMetadata(payload, contextInfo, cardCount);
     return;
@@ -343,17 +331,15 @@ function renderMetadata(payload, contextInfo, cardCount) {
     extras.appendChild(stepsDetails);
   }
 
-  const requestedCount = Number.isFinite(cardCount) ? cardCount : null;
+  const requestedCount = 5;
   const actualCount = Array.isArray(payload?.cards)
     ? payload.cards.length
     : Object.keys(payload?.cards || {}).length;
 
-  if (requestedCount !== null) {
-    const countNote = document.createElement("p");
-    countNote.className = "flashcard-selection-note";
-    countNote.textContent = `Requested ${requestedCount} flashcards; received ${actualCount}.`;
-    extras.appendChild(countNote);
-  }
+  const countNote = document.createElement("p");
+  countNote.className = "flashcard-selection-note";
+  countNote.textContent = `Requested ${requestedCount} flashcards; received ${actualCount}.`;
+  extras.appendChild(countNote);
 
   if (contextInfo?.usedSelection) {
     const selectionTag = document.createElement("p");

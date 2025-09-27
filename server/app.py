@@ -27,8 +27,7 @@ app.add_middleware(
 )
 
 DEFAULT_MODEL = "gemini-2.0-flash"
-DEFAULT_FLASHCARD_COUNT = 5
-MAX_FLASHCARD_COUNT = 5
+FLASHCARD_COUNT = 5
 LOG_PATH = Path(__file__).resolve().parent / "logs" / "agent_history.log"
 
 SUMMARY_PROMPT_TEMPLATE = (
@@ -51,12 +50,6 @@ FLASHCARD_PROMPT_TEMPLATE = (
 class GenerateRequest(BaseModel):
     prompt: str = Field(..., min_length=1, description="Raw learner request to turn into study flashcards.")
     model: str = Field(DEFAULT_MODEL, min_length=1, description="Gemini model to use for all calls.")
-    flashcard_count: int = Field(
-        DEFAULT_FLASHCARD_COUNT,
-        ge=0,
-        le=MAX_FLASHCARD_COUNT,
-        description="Maximum number of flashcards to create.",
-    )
     api_key: str | None = Field(
         default=None,
         description="Optional Gemini API key. Falls back to GEMINI_API_KEY env var when omitted.",
@@ -161,7 +154,6 @@ def _append_history_log(entry: dict[str, Any]) -> None:
     timestamp = entry.get("timestamp") or datetime.utcnow().isoformat() + "Z"
     status = entry.get("status", "unknown")
     model = entry.get("model", "")
-    flashcard_count = entry.get("flashcard_count", "")
     prompt = (entry.get("prompt") or "").strip()
     summary = (entry.get("study_summary") or "").strip()
     summary_prompt = (entry.get("summary_prompt") or "").strip()
@@ -178,8 +170,7 @@ def _append_history_log(entry: dict[str, Any]) -> None:
         lines.append(f"Error: {entry['error']}")
     if model:
         lines.append(f"Model: {model}")
-    if flashcard_count != "":
-        lines.append(f"Requested Flashcards: {flashcard_count}")
+    lines.append(f"Requested Flashcards: {FLASHCARD_COUNT}")
     lines.append("")
 
     if prompt:
@@ -279,7 +270,7 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "prompt": request.prompt,
         "model": model_name,
-        "flashcard_count": request.flashcard_count,
+        "flashcard_count": FLASHCARD_COUNT,
         "summary_prompt": summary_prompt,
     }
 
@@ -299,17 +290,8 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
         steps.append("Step 1: Summarised the learner prompt into study notes.")
         log_context["study_summary"] = summary_text
 
-        if request.flashcard_count == 0:
-            steps.append("Step 2: Flashcard generation skipped (count set to 0).")
-            response_payload = GenerateResponse(cards={}, steps=steps, source_summary=summary_text)
-            log_context["status"] = "success"
-            log_context["steps"] = steps
-            log_context["cards"] = {}
-            _append_history_log(log_context)
-            return response_payload
-
         cards_prompt = FLASHCARD_PROMPT_TEMPLATE.format(
-            flashcard_count=request.flashcard_count,
+            flashcard_count=FLASHCARD_COUNT,
             study_summary=summary_text,
         )
         log_context["cards_prompt"] = cards_prompt
@@ -325,12 +307,10 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
         if not flashcard_raw:
             raise HTTPException(status_code=502, detail="Gemini returned empty flashcard content.")
 
-        steps.append(
-            f"Step 2: Requested up to {request.flashcard_count} flashcards from Gemini."
-        )
+        steps.append("Step 2: Requested up to 5 flashcards from Gemini.")
 
         try:
-            flashcards = _parse_flashcards(flashcard_raw, request.flashcard_count)
+            flashcards = _parse_flashcards(flashcard_raw, FLASHCARD_COUNT)
         except ValueError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         steps.append(f"Step 3: Parsed {len(flashcards)} flashcards from Gemini's response.")
