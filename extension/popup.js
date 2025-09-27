@@ -28,9 +28,9 @@ async function handleGenerate() {
     }
 
     setStatus("Talking with Gemini...", { loading: true });
-    const prompt = buildPrompt(contextInfo);
+    const webpage_raw_content = buildPrompt(contextInfo);
     const cardCount = 5;
-    const payload = await callGemini(prompt, cardCount);
+    const payload = await callGemini(webpage_raw_content, cardCount);
     showResult(payload, contextInfo, cardCount);
     setStatus("Cards ready! Click a card to reveal the answer.");
   } catch (error) {
@@ -118,7 +118,7 @@ ${text}
 """`;
 }
 
-async function callGemini(prompt, cardCount) {
+async function callGemini(webpage_raw_content, cardCount) {
   let response;
   try {
     response = await fetch(LOCAL_GENERATE_ENDPOINT, {
@@ -127,7 +127,7 @@ async function callGemini(prompt, cardCount) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        prompt
+        webpage_raw_content
       }),
     });
   } catch (error) {
