@@ -32,9 +32,9 @@ async function handleGenerate() {
     }
 
     setStatus("Talking with Gemini...", { loading: true });
-    const webpage_raw_content = buildPrompt(contextInfo);
+    const pageContextPayload = buildPageContextPayload(contextInfo);
     const cardCount = 5;
-    const payload = await callGemini(webpage_raw_content, cardCount);
+    const payload = await callGemini(pageContextPayload, cardCount);
     showResult(payload, contextInfo, cardCount);
     setStatus("Cards ready! Click a card to reveal the answer.");
   } catch (error) {
@@ -105,27 +105,18 @@ async function collectPageContext() {
   }
 }
 
-function buildPrompt(contextInfo) {
-  // Construct the instructions the backend forwards to Gemini.
+function buildPageContextPayload(contextInfo) {
+  // Prepare a structured payload of the extracted page content for the backend.
   const { text, truncated, usedSelection } = contextInfo;
-  const selectionNote = usedSelection
-    ? "\nThe learner highlighted specific text. Prioritize the highlighted material while still using broader context when relevant."
-    : "";
-  const truncationNote = truncated
-    ? "\nThe context was truncated for length. Respond using only the provided portion."
-    : "";
 
-  return `Create high-quality study flashcards for a learner using the material below.
-Each card should cover a single concept, definition, or application in a way that encourages active recall.
-${selectionNote}${truncationNote}
-
-Context:
-"""
-${text}
-"""`;
+  return {
+    text,
+    truncated,
+    used_selection: usedSelection,
+  };
 }
 
-async function callGemini(webpage_raw_content, cardCount) {
+async function callGemini(pageContextPayload, cardCount) {
   // Delegate to the FastAPI service; it proxies the Gemini request.
   let response;
   try {
@@ -135,7 +126,7 @@ async function callGemini(webpage_raw_content, cardCount) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        webpage_raw_content
+        page_context: pageContextPayload,
       }),
     });
   } catch (error) {

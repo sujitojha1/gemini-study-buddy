@@ -32,9 +32,10 @@ LOG_PATH = Path(__file__).resolve().parent / "logs" / f"agent_history_{datetime.
 LOG_LINE_WIDTH = 72
 
 SUMMARY_PROMPT_TEMPLATE = (
-    "Extract the essential study notes from the following learner request. "
-    "Focus on crisp facts, definitions, formulas, and conceptual explanations.\n\n"
-    "Learner request:\n{user_prompt}"
+    "Extract the essential study notes from the learner material below. "
+    "Focus on crisp facts, definitions, formulas, and conceptual explanations.\n"
+    "{selection_note}{truncation_note}\n"
+    "Learner material:\n{page_text}"
 )
 
 FLASHCARD_PROMPT_TEMPLATE = (
@@ -48,8 +49,14 @@ FLASHCARD_PROMPT_TEMPLATE = (
 )
 
 
+class PageContext(BaseModel):
+    text: str = Field(..., min_length=1, description="Combined selection or page text extracted from the learner's web page.")
+    truncated: bool = Field(False, description="True if the original page content was truncated for length.")
+    used_selection: bool = Field(False, description="True if the learner highlighted specific text instead of using the full page body.")
+
+
 class GenerateRequest(BaseModel):
-    webpage_raw_content: str = Field(..., min_length=1, description="Raw learner request to turn into study flashcards.")
+    page_context: PageContext = Field(..., description="Structured representation of the learner's captured page content.")
 
 
 class Flashcard(BaseModel):
@@ -173,7 +180,8 @@ async def health() -> dict[str, str]:
 )
 async def generate(request: GenerateRequest) -> GenerateResponse:
     # Capture a trimmed version of the learner content to keep logs readable.
-    request_text = request.webpage_raw_content.strip()
+    page_context = request.page_context
+    request_text = page_context.text.strip()
     preview = " ".join(request_text.split())[:160]
     if len(request_text) > 160:
         preview = f"{preview}..."
@@ -208,7 +216,23 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
     steps: list[str] = []
     cards: dict[str, Flashcard] = {}
     summary_text = ""
-    summary_prompt = SUMMARY_PROMPT_TEMPLATE.format(user_prompt=request.webpage_raw_content.strip())
+    selection_note = ""
+    if page_context.used_selection:
+        selection_note = (
+            "The learner highlighted specific text. Prioritize the highlighted material while still using the broader context when relevant.\n"
+        )
+
+    truncation_note = ""
+    if page_context.truncated:
+        truncation_note = (
+            "The context was truncated for length. Respond using only the provided portion.\n"
+        )
+
+    summary_prompt = SUMMARY_PROMPT_TEMPLATE.format(
+        page_text=request_text,
+        selection_note=selection_note,
+        truncation_note=truncation_note,
+    )
     cards_prompt = ""
     flashcard_raw = ""
 
