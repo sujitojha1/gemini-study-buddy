@@ -3,3 +3,4 @@ extension/.env
 server/.env
 server/venv
 server/__pycache__/
+notebooks/.env
