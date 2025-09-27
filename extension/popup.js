@@ -127,9 +127,7 @@ async function callGemini(prompt, cardCount) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        prompt,
-        model: MODEL,
-        flashcard_count: cardCount,
+        prompt
       }),
     });
   } catch (error) {

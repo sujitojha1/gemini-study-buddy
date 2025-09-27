@@ -28,7 +28,7 @@ app.add_middleware(
 
 DEFAULT_MODEL = "gemini-2.0-flash"
 FLASHCARD_COUNT = 5
-LOG_PATH = Path(__file__).resolve().parent / "logs" / "agent_history.log"
+LOG_PATH = Path(__file__).resolve().parent / "logs" / f"agent_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 
 SUMMARY_PROMPT_TEMPLATE = (
     "Extract the essential study notes from the following learner request. "
@@ -48,12 +48,7 @@ FLASHCARD_PROMPT_TEMPLATE = (
 
 
 class GenerateRequest(BaseModel):
-    prompt: str = Field(..., min_length=1, description="Raw learner request to turn into study flashcards.")
-    model: str = Field(DEFAULT_MODEL, min_length=1, description="Gemini model to use for all calls.")
-    api_key: str | None = Field(
-        default=None,
-        description="Optional Gemini API key. Falls back to GEMINI_API_KEY env var when omitted.",
-    )
+    webpage_raw_content: str = Field(..., min_length=1, description="Raw learner request to turn into study flashcards.")
 
 
 class Flashcard(BaseModel):
@@ -150,84 +145,6 @@ def _parse_flashcards(raw_text: str, max_cards: int) -> list[Flashcard]:
     return flashcards
 
 
-def _append_history_log(entry: dict[str, Any]) -> None:
-    timestamp = entry.get("timestamp") or datetime.utcnow().isoformat() + "Z"
-    status = entry.get("status", "unknown")
-    model = entry.get("model", "")
-    prompt = (entry.get("prompt") or "").strip()
-    summary = (entry.get("study_summary") or "").strip()
-    summary_prompt = (entry.get("summary_prompt") or "").strip()
-    summary_raw = (entry.get("summary_raw") or "").strip()
-    cards_prompt = (entry.get("cards_prompt") or "").strip()
-    cards_raw = (entry.get("cards_raw") or "").strip()
-    steps = entry.get("steps") or []
-    cards = entry.get("cards") or {}
-
-    lines: list[str] = []
-    lines.append(f"=== Gemini Flashcard Run @ {timestamp} ===")
-    lines.append(f"Status: {status}")
-    if entry.get("error"):
-        lines.append(f"Error: {entry['error']}")
-    if model:
-        lines.append(f"Model: {model}")
-    lines.append(f"Requested Flashcards: {FLASHCARD_COUNT}")
-    lines.append("")
-
-    if prompt:
-        lines.append("Prompt:")
-        lines.append(prompt)
-        lines.append("")
-
-    if summary_prompt:
-        lines.append("Summary Prompt:")
-        lines.append(summary_prompt)
-        lines.append("")
-
-    if summary_raw:
-        lines.append("Summary Response:")
-        lines.append(summary_raw)
-        lines.append("")
-
-    if cards_prompt:
-        lines.append("Flashcard Prompt:")
-        lines.append(cards_prompt)
-        lines.append("")
-
-    if cards_raw:
-        lines.append("Flashcard Response:")
-        lines.append(cards_raw)
-        lines.append("")
-
-    if summary:
-        lines.append("Study Summary Used:")
-        lines.append(summary)
-        lines.append("")
-
-    if steps:
-        lines.append("Steps:")
-        for step in steps:
-            lines.append(step)
-        lines.append("")
-
-    lines.append("Cards:")
-    if cards:
-        for idx, (card_id, card) in enumerate(cards.items(), start=1):
-            lines.append(f"- {card_id} (#{idx})")
-            lines.append(f"  Front: {card.get('front', '').strip()}")
-            lines.append(f"  Back: {card.get('back', '').strip()}")
-    else:
-        lines.append("(none)")
-    lines.append("")
-
-    lines.append("=== End Run ===")
-    lines.append("")
-
-    try:
-        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with LOG_PATH.open("a", encoding="utf-8") as handle:
-            handle.write("\n".join(lines))
-    except Exception:
-        pass
 
 
 @app.get("/health", response_model=dict[str, str])
@@ -242,17 +159,15 @@ async def health() -> dict[str, str]:
 )
 async def generate(request: GenerateRequest) -> GenerateResponse:
     api_key =  os.getenv("GEMINI_API_KEY")
+    print("stage1")
+
     if not api_key:
         raise HTTPException(
             status_code=400,
             detail="Gemini API key missing. Provide it in the request or set GEMINI_API_KEY.",
         )
-
-    model_name = request.model.strip()
-    if not model_name:
-        raise HTTPException(status_code=400, detail="Model name may not be empty.")
-    if not model_name.startswith("models/"):
-        model_name = f"models/{model_name}"
+    
+    model_name = DEFAULT_MODEL
 
     try:
         client = _get_client(api_key)
@@ -262,17 +177,10 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
     steps: list[str] = []
     cards: dict[str, Flashcard] = {}
     summary_text = ""
-    summary_prompt = SUMMARY_PROMPT_TEMPLATE.format(user_prompt=request.prompt.strip())
+    summary_prompt = SUMMARY_PROMPT_TEMPLATE.format(user_prompt=request.webpage_raw_content.strip())
     cards_prompt = ""
     flashcard_raw = ""
 
-    log_context: dict[str, Any] = {
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        "prompt": request.prompt,
-        "model": model_name,
-        "flashcard_count": FLASHCARD_COUNT,
-        "summary_prompt": summary_prompt,
-    }
 
     try:
         summary_response = await run_in_threadpool(
@@ -281,20 +189,19 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
             contents=summary_prompt,
         )
         summary_raw = _extract_text(summary_response)
-        log_context["summary_raw"] = summary_raw
+        
 
         if not summary_raw:
             raise HTTPException(status_code=502, detail="Gemini returned an empty study summary.")
 
         summary_text = summary_raw.strip()
-        steps.append("Step 1: Summarised the learner prompt into study notes.")
-        log_context["study_summary"] = summary_text
+        
 
         cards_prompt = FLASHCARD_PROMPT_TEMPLATE.format(
             flashcard_count=FLASHCARD_COUNT,
             study_summary=summary_text,
         )
-        log_context["cards_prompt"] = cards_prompt
+        
 
         flashcard_response = await run_in_threadpool(
             client.models.generate_content,
@@ -302,18 +209,16 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
             contents=cards_prompt,
         )
         flashcard_raw = _extract_text(flashcard_response)
-        log_context["cards_raw"] = flashcard_raw
+        
 
         if not flashcard_raw:
             raise HTTPException(status_code=502, detail="Gemini returned empty flashcard content.")
 
-        steps.append("Step 2: Requested up to 5 flashcards from Gemini.")
 
         try:
             flashcards = _parse_flashcards(flashcard_raw, FLASHCARD_COUNT)
         except ValueError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
-        steps.append(f"Step 3: Parsed {len(flashcards)} flashcards from Gemini's response.")
 
         cards = {
             f"card_{index}": card
@@ -321,37 +226,14 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
         }
 
         response_payload = GenerateResponse(cards=cards, steps=steps, source_summary=summary_text)
-        log_context["status"] = "success"
-        log_context["steps"] = steps
-        log_context["cards"] = {card_id: card.dict() for card_id, card in cards.items()}
-        _append_history_log(log_context)
         return response_payload
 
     except HTTPException as exc:
-        log_context["status"] = "error"
-        log_context["error"] = str(exc.detail)
-        log_context["steps"] = steps
-        log_context["cards"] = {card_id: card.dict() for card_id, card in cards.items()}
-        if summary_text:
-            log_context["study_summary"] = summary_text
-        if cards_prompt:
-            log_context["cards_prompt"] = cards_prompt
-        if flashcard_raw:
-            log_context["cards_raw"] = flashcard_raw
-        _append_history_log(log_context)
+        print("hi {exc}")
+
         raise
     except Exception as exc:
-        log_context["status"] = "error"
-        log_context["error"] = str(exc)
-        log_context["steps"] = steps
-        log_context["cards"] = {card_id: card.dict() for card_id, card in cards.items()}
-        if summary_text:
-            log_context["study_summary"] = summary_text
-        if cards_prompt:
-            log_context["cards_prompt"] = cards_prompt
-        if flashcard_raw:
-            log_context["cards_raw"] = flashcard_raw
-        _append_history_log(log_context)
+
         raise HTTPException(status_code=502, detail=f"Gemini request failed: {exc}")
 
 
