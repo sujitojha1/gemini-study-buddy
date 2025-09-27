@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from google import genai
@@ -32,6 +34,9 @@ SUMMARY_PROMPT_TEMPLATE = (
     "Focus on crisp facts, definitions, formulas, and conceptual explanations.\n\n"
     "Learner request:\n{user_prompt}"
 )
+LOG_PATH = Path(__file__).resolve().parent / "logs" / "agent_history.log"
+
+
 AGENT_SYSTEM_PROMPT = (
     "You are a collaborative flashcard author.\n"
     "Goal: create exactly {flashcard_count} high-quality flashcards from the provided study summary.\n"
@@ -144,6 +149,17 @@ def _parse_function_call(response_text: str) -> tuple[str, str]:
     return func_name, raw_params
 
 
+def _append_history_log(entry: dict[str, Any]) -> None:
+    try:
+        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with LOG_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False))
+            handle.write("\n")
+    except Exception:
+        # Avoid surfacing logging issues to the client; best effort only.
+        pass
+
+
 @app.get("/health", response_model=dict[str, str])
 async def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -200,90 +216,120 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
     cards: dict[str, Flashcard] = {}
     card_counter = 0
 
-    for iteration in range(AGENT_MAX_ITERATIONS):
-        history_block = "\n\n".join(history)
-        if history_block:
-            agent_prompt = f"{system_prompt}\n\nQuery: {flashcard_goal}\n\n{history_block}\n\nWhat should I do next?"
-        else:
-            agent_prompt = f"{system_prompt}\n\nQuery: {flashcard_goal}"
+    log_context: dict[str, Any] = {
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "prompt": request.prompt,
+        "model": model_name,
+        "flashcard_count": request.flashcard_count,
+        "study_summary": study_summary,
+    }
 
-        try:
-            agent_response = await run_in_threadpool(
-                client.models.generate_content,
-                model=model_name,
-                contents=agent_prompt,
-            )
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"Failed to reach Gemini during agent run: {exc}") from exc
+    try:
+        for iteration in range(AGENT_MAX_ITERATIONS):
+            history_block = "\n\n".join(history)
+            if history_block:
+                agent_prompt = f"{system_prompt}\n\nQuery: {flashcard_goal}\n\n{history_block}\n\nWhat should I do next?"
+            else:
+                agent_prompt = f"{system_prompt}\n\nQuery: {flashcard_goal}"
 
-        agent_text = _extract_text(agent_response)
-        if not agent_text:
-            raise HTTPException(status_code=502, detail="Gemini agent returned an empty response.")
-
-        steps.append(f"Step 2.{iteration + 1}: Agent response -> {agent_text}")
-        normalized = agent_text.strip()
-
-        if normalized.startswith("FINAL_JSON:"):
-            if len(cards) != request.flashcard_count:
-                raise HTTPException(
-                    status_code=502,
-                    detail=(
-                        "Gemini agent signaled completion without producing the expected number of flashcards."
-                    ),
+            try:
+                agent_response = await run_in_threadpool(
+                    client.models.generate_content,
+                    model=model_name,
+                    contents=agent_prompt,
                 )
-            break
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=f"Failed to reach Gemini during agent run: {exc}") from exc
 
-        if normalized.startswith("FUNCTION_CALL:"):
-            try:
-                func_name, raw_params = _parse_function_call(normalized)
-            except ValueError as exc:
-                raise HTTPException(status_code=502, detail=str(exc)) from exc
+            agent_text = _extract_text(agent_response)
+            if not agent_text:
+                raise HTTPException(status_code=502, detail="Gemini agent returned an empty response.")
 
-            if func_name != "format_flash_card":
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Unsupported tool requested: {func_name}",
-                )
+            steps.append(f"Step 2.{iteration + 1}: Agent response -> {agent_text}")
+            normalized = agent_text.strip()
 
-            try:
-                payload = json.loads(raw_params)
-            except json.JSONDecodeError as exc:
-                raise HTTPException(status_code=502, detail=f"Invalid flashcard JSON: {exc}") from exc
+            if normalized.startswith("FINAL_JSON:"):
+                if len(cards) != request.flashcard_count:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=(
+                            "Gemini agent signaled completion without producing the expected number of flashcards."
+                        ),
+                    )
+                break
 
-            try:
-                formatted = format_flash_card(payload)
-            except ValueError as exc:
-                raise HTTPException(status_code=502, detail=str(exc)) from exc
+            if normalized.startswith("FUNCTION_CALL:"):
+                try:
+                    func_name, raw_params = _parse_function_call(normalized)
+                except ValueError as exc:
+                    raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-            card_counter += 1
-            card_id = payload.get("id") or f"card_{card_counter}"
-            cards[card_id] = Flashcard(**formatted)
+                if func_name != "format_flash_card":
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"Unsupported tool requested: {func_name}",
+                    )
 
-            history.append(
-                f"In iteration {iteration + 1}, you formatted flashcard {card_id}: front='{formatted['front']}' back='{formatted['back']}'."
-            )
-            steps.append(
-                f"Step 2.{iteration + 1}: Stored flashcard {card_id} with front='{formatted['front']}'."
-            )
+                try:
+                    payload = json.loads(raw_params)
+                except json.JSONDecodeError as exc:
+                    raise HTTPException(status_code=502, detail=f"Invalid flashcard JSON: {exc}") from exc
 
-            if len(cards) == request.flashcard_count:
+                try:
+                    formatted = format_flash_card(payload)
+                except ValueError as exc:
+                    raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+                card_counter += 1
+                card_id = payload.get("id") or f"card_{card_counter}"
+                cards[card_id] = Flashcard(**formatted)
+
                 history.append(
-                    "All required flashcards are prepared. Respond with FINAL_JSON to confirm completion."
+                    f"In iteration {iteration + 1}, you formatted flashcard {card_id}: front='{formatted['front']}' back='{formatted['back']}'."
+                )
+                steps.append(
+                    f"Step 2.{iteration + 1}: Stored flashcard {card_id} with front='{formatted['front']}'."
                 )
 
-            continue
+                if len(cards) == request.flashcard_count:
+                    history.append(
+                        "All required flashcards are prepared. Respond with FINAL_JSON to confirm completion."
+                    )
 
-        raise HTTPException(
-            status_code=502,
-            detail="Gemini agent returned an unexpected response format.",
-        )
-    else:
-        raise HTTPException(
-            status_code=502,
-            detail="Gemini agent did not finish within the allowed iterations.",
-        )
+                continue
 
-    return GenerateResponse(cards=cards, steps=steps, source_summary=study_summary)
+            raise HTTPException(
+                status_code=502,
+                detail="Gemini agent returned an unexpected response format.",
+            )
+        else:
+            raise HTTPException(
+                status_code=502,
+                detail="Gemini agent did not finish within the allowed iterations.",
+            )
+    except HTTPException as exc:
+        log_context["status"] = "error"
+        log_context["error"] = str(exc.detail)
+        log_context["steps"] = steps
+        log_context["cards"] = {card_id: card.dict() for card_id, card in cards.items()}
+        _append_history_log(log_context)
+        raise
+    except Exception as exc:
+        log_context["status"] = "error"
+        log_context["error"] = str(exc)
+        log_context["steps"] = steps
+        log_context["cards"] = {card_id: card.dict() for card_id, card in cards.items()}
+        _append_history_log(log_context)
+        raise HTTPException(status_code=502, detail=f"Gemini agent failed unexpectedly: {exc}") from exc
+
+    response_payload = GenerateResponse(cards=cards, steps=steps, source_summary=study_summary)
+
+    log_context["status"] = "success"
+    log_context["steps"] = steps
+    log_context["cards"] = {card_id: card.dict() for card_id, card in cards.items()}
+    _append_history_log(log_context)
+
+    return response_payload
 
 
 if __name__ == "__main__":
