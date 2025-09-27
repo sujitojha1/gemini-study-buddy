@@ -241,7 +241,7 @@ async def health() -> dict[str, str]:
     responses={400: {"model": ErrorResponse}, 502: {"model": ErrorResponse}},
 )
 async def generate(request: GenerateRequest) -> GenerateResponse:
-    api_key = (request.api_key or os.getenv("GEMINI_API_KEY") or "").strip()
+    api_key =  os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise HTTPException(
             status_code=400,
