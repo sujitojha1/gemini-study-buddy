@@ -150,11 +150,65 @@ def _parse_function_call(response_text: str) -> tuple[str, str]:
 
 
 def _append_history_log(entry: dict[str, Any]) -> None:
+    timestamp = entry.get("timestamp") or datetime.utcnow().isoformat() + "Z"
+    status = entry.get("status", "unknown")
+    model = entry.get("model", "")
+    flashcard_count = entry.get("flashcard_count", "")
+    prompt = (entry.get("prompt") or "").strip()
+    summary = (entry.get("study_summary") or "").strip()
+    steps = entry.get("steps") or []
+    cards = entry.get("cards") or {}
+    transcript = entry.get("transcript") or []
+
+    lines: list[str] = []
+    lines.append(f"=== Gemini Flashcard Run @ {timestamp} ===")
+    lines.append(f"Status: {status}")
+    if model:
+        lines.append(f"Model: {model}")
+    if flashcard_count:
+        lines.append(f"Flashcard Count: {flashcard_count}")
+    lines.append("")
+
+    if prompt:
+        lines.append("Prompt:")
+        lines.append(prompt)
+        lines.append("")
+
+    if summary:
+        lines.append("Study Summary:")
+        lines.append(summary)
+        lines.append("")
+
+    if steps:
+        lines.append("Steps:")
+        for step in steps:
+            lines.append(step)
+        lines.append("")
+
+    lines.append("Cards:")
+    if cards:
+        for card_id, card in cards.items():
+            front = (card.get("front") or "").strip()
+            back = (card.get("back") or "").strip()
+            lines.append(f"- {card_id}")
+            lines.append(f"  Front: {front}")
+            lines.append(f"  Back: {back}")
+    else:
+        lines.append("(none)")
+    lines.append("")
+
+    if transcript:
+        lines.append("Transcript:")
+        lines.extend(transcript)
+        lines.append("")
+
+    lines.append("=== End Run ===")
+    lines.append("")
+
     try:
         LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         with LOG_PATH.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry, ensure_ascii=False))
-            handle.write("\n")
+            handle.write("\n".join(lines))
     except Exception:
         # Avoid surfacing logging issues to the client; best effort only.
         pass
@@ -224,6 +278,9 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
         "study_summary": study_summary,
     }
 
+    log_lines: list[str] = []
+    log_lines.append("Study summary prepared for agent.")
+
     try:
         for iteration in range(AGENT_MAX_ITERATIONS):
             history_block = "\n\n".join(history)
@@ -245,6 +302,8 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
             if not agent_text:
                 raise HTTPException(status_code=502, detail="Gemini agent returned an empty response.")
 
+            log_lines.append(f"--- Iteration {iteration + 1} ---")
+            log_lines.append(f"LLM Response: {agent_text}")
             steps.append(f"Step 2.{iteration + 1}: Agent response -> {agent_text}")
             normalized = agent_text.strip()
 
@@ -256,6 +315,7 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
                             "Gemini agent signaled completion without producing the expected number of flashcards."
                         ),
                     )
+                log_lines.append("=== Agent Execution Complete ===")
                 break
 
             if normalized.startswith("FUNCTION_CALL:"):
@@ -280,6 +340,10 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
                 except ValueError as exc:
                     raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+                log_lines.append(f"  Tool Call: {func_name}|{raw_params}")
+                log_lines.append(
+                    f"  Result: front='{formatted['front']}' back='{formatted['back']}'"
+                )
                 card_counter += 1
                 card_id = payload.get("id") or f"card_{card_counter}"
                 cards[card_id] = Flashcard(**formatted)
@@ -298,20 +362,28 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
 
                 continue
 
+            detail_message = "Gemini agent returned an unexpected response format."
+            log_lines.append(f"!!! Error: {detail_message}")
             raise HTTPException(
                 status_code=502,
-                detail="Gemini agent returned an unexpected response format.",
+                detail=detail_message,
             )
         else:
+            detail_message = "Gemini agent did not finish within the allowed iterations."
+            log_lines.append(f"!!! Error: {detail_message}")
             raise HTTPException(
                 status_code=502,
-                detail="Gemini agent did not finish within the allowed iterations.",
+                detail=detail_message,
             )
     except HTTPException as exc:
         log_context["status"] = "error"
         log_context["error"] = str(exc.detail)
         log_context["steps"] = steps
         log_context["cards"] = {card_id: card.dict() for card_id, card in cards.items()}
+        error_line = f"!!! Error: {exc.detail}"
+        if not log_lines or log_lines[-1] != error_line:
+            log_lines.append(error_line)
+        log_context["transcript"] = log_lines
         _append_history_log(log_context)
         raise
     except Exception as exc:
@@ -319,6 +391,8 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
         log_context["error"] = str(exc)
         log_context["steps"] = steps
         log_context["cards"] = {card_id: card.dict() for card_id, card in cards.items()}
+        log_lines.append(f"!!! Error: {exc}")
+        log_context["transcript"] = log_lines
         _append_history_log(log_context)
         raise HTTPException(status_code=502, detail=f"Gemini agent failed unexpectedly: {exc}") from exc
 
@@ -327,6 +401,9 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
     log_context["status"] = "success"
     log_context["steps"] = steps
     log_context["cards"] = {card_id: card.dict() for card_id, card in cards.items()}
+    if not log_lines or not log_lines[-1].startswith("=== Agent Execution Complete ==="):
+        log_lines.append("=== Agent Execution Complete ===")
+    log_context["transcript"] = log_lines
     _append_history_log(log_context)
 
     return response_payload
