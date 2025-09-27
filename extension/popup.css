@@ -81,6 +81,34 @@ h2 {
   margin-bottom: 16px;
 }
 
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.settings-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-control input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.settings-control span {
+  min-width: 24px;
+  text-align: right;
+  font-weight: 600;
+}
+
 .actions {
   display: flex;
   gap: 10px;

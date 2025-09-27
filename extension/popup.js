@@ -1,5 +1,4 @@
 const MODEL = "gemini-2.0-flash";
-const FLASHCARD_COUNT = 5;
 const LOCAL_API_BASE = "http://127.0.0.1:8000";
 const LOCAL_GENERATE_ENDPOINT = `${LOCAL_API_BASE}/generate`;
 
@@ -10,11 +9,16 @@ const resultSection = document.getElementById("resultSection");
 const resultEl = document.getElementById("result");
 const loadingTemplate = document.getElementById("loadingTemplate");
 const flashcardButton = document.getElementById("flashcardBtn");
+const cardCountInput = document.getElementById("cardCount");
+const cardCountValue = document.getElementById("cardCountValue");
 
 init();
 
 function init() {
   flashcardButton.addEventListener("click", handleGenerate);
+  cardCountInput.addEventListener("input", () => {
+    cardCountValue.textContent = cardCountInput.value;
+  });
   setStatus("Highlight what matters or just run it on the full page.");
 }
 
@@ -30,9 +34,13 @@ async function handleGenerate() {
 
     setStatus("Talking with Gemini...", { loading: true });
     const prompt = buildPrompt(contextInfo);
-    const payload = await callGemini(prompt);
-    showResult(payload, contextInfo);
-    setStatus("Cards ready! Click a card to reveal the answer.");
+    const cardCount = Number(cardCountInput.value) || 0;
+    const payload = await callGemini(prompt, cardCount);
+    showResult(payload, contextInfo, cardCount);
+    const doneMessage = cardCount === 0
+      ? "Summary ready! No flashcards requested."
+      : "Cards ready! Click a card to reveal the answer.";
+    setStatus(doneMessage);
   } catch (error) {
     console.error(error);
     const message = error?.message || "Something went wrong while generating.";
@@ -118,7 +126,7 @@ ${text}
 """`;
 }
 
-async function callGemini(prompt) {
+async function callGemini(prompt, cardCount) {
   let response;
   try {
     response = await fetch(LOCAL_GENERATE_ENDPOINT, {
@@ -129,7 +137,7 @@ async function callGemini(prompt) {
       body: JSON.stringify({
         prompt,
         model: MODEL,
-        flashcard_count: FLASHCARD_COUNT,
+        flashcard_count: cardCount,
       }),
     });
   } catch (error) {
@@ -151,20 +159,25 @@ async function callGemini(prompt) {
   return payload;
 }
 
-function showResult(payload, contextInfo) {
+function showResult(payload, contextInfo, cardCount) {
   resultEl.innerHTML = "";
   resultEl.classList.remove("has-flashcards");
 
   const cards = normalizeFlashcards(payload?.cards);
   if (!cards.length) {
-    resultEl.textContent = "Gemini did not return any flashcards. Try again with a smaller selection.";
+    if (cardCount === 0) {
+      resultEl.textContent = "Flashcards were skipped. Review the study summary below.";
+    } else {
+      resultEl.textContent = "Gemini did not return any flashcards. Try again with a smaller selection.";
+    }
     resultSection.hidden = false;
+    renderMetadata(payload, contextInfo, cardCount);
     return;
   }
 
   resultEl.classList.add("has-flashcards");
   renderFlashcards(cards);
-  renderMetadata(payload, contextInfo);
+  renderMetadata(payload, contextInfo, cardCount);
   resultSection.hidden = false;
 }
 
@@ -288,7 +301,7 @@ function renderFlashcards(cards) {
   updateCard(0);
 }
 
-function renderMetadata(payload, contextInfo) {
+function renderMetadata(payload, contextInfo, cardCount) {
   const extras = document.createElement("div");
   extras.className = "flashcard-meta";
 
@@ -328,6 +341,18 @@ function renderMetadata(payload, contextInfo) {
     stepsDetails.appendChild(stepsTitle);
     stepsDetails.appendChild(stepsList);
     extras.appendChild(stepsDetails);
+  }
+
+  const requestedCount = Number.isFinite(cardCount) ? cardCount : null;
+  const actualCount = Array.isArray(payload?.cards)
+    ? payload.cards.length
+    : Object.keys(payload?.cards || {}).length;
+
+  if (requestedCount !== null) {
+    const countNote = document.createElement("p");
+    countNote.className = "flashcard-selection-note";
+    countNote.textContent = `Requested ${requestedCount} flashcards; received ${actualCount}.`;
+    extras.appendChild(countNote);
   }
 
   if (contextInfo?.usedSelection) {
