@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import ast
-import math
+import json
 import os
 from functools import lru_cache
 from typing import Any
@@ -15,7 +14,7 @@ from starlette.concurrency import run_in_threadpool
 
 load_dotenv()
 
-app = FastAPI(title="Gemini Study Buddy API", version="0.1.0")
+app = FastAPI(title="Gemini Study Buddy API", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -26,39 +25,77 @@ app.add_middleware(
 )
 
 DEFAULT_MODEL = "gemini-2.0-flash"
-DEFAULT_MAX_ITERATIONS = 3
-AGENT_SYSTEM_PROMPT = (
-    "You are a helpful study assistant that can call Python tools to solve tasks. "
-    "ALWAYS respond with EXACTLY ONE of the following formats on each turn:\n"
-    "1. FUNCTION_CALL: python_function_name|input\n"
-    "2. FINAL_ANSWER: answer\n\n"
-    "Available python_function_name values:\n"
-    "- strings_to_chars_to_int(string): returns ASCII integer values for each character in the string\n"
-    "- int_list_to_exponential_sum(list[int]): returns the sum of exponentials for the provided integers\n"
-    "- fibonacci_numbers(int): returns the first n Fibonacci numbers as a list\n"
-    "- format_flash_card(text): converts narrative content into a 'Front:'/'Back:' flash card string\n\n"
-    "Always finish by calling format_flash_card before issuing your FINAL_ANSWER so the user receives a flash card."
+DEFAULT_FLASHCARD_COUNT = 5
+AGENT_MAX_ITERATIONS = 10
+SUMMARY_PROMPT_TEMPLATE = (
+    "Extract the essential study notes from the following learner request. "
+    "Focus on crisp facts, definitions, formulas, and conceptual explanations.\n\n"
+    "Learner request:\n{user_prompt}"
 )
+AGENT_SYSTEM_PROMPT = (
+    "You are a collaborative flashcard author.\n"
+    "Goal: create exactly {flashcard_count} high-quality flashcards from the provided study summary.\n"
+    "Use the available tool to format each flashcard.\n\n"
+    "ALLOWED RESPONSES (return exactly one per turn):\n"
+    "1. FUNCTION_CALL: format_flash_card|<json_payload>\n"
+    "   - json_payload must be a JSON object with 'front' and 'back' strings.\n"
+    "2. FINAL_JSON: <json_payload>\n"
+    "   - Send this only after all flashcards are formatted.\n"
+    "   - Include any short completion metadata you find useful.\n\n"
+    "Workflow guidelines:\n"
+    "- Analyze the study summary.\n"
+    "- For each flashcard, craft concise 'front' (question/prompt) and 'back' (answer/explanation).\n"
+    "- Call format_flash_card with JSON like {{\"front\": \"...\", \"back\": \"...\"}}.\n"
+    "- After you have formatted {flashcard_count} flashcards, respond with FINAL_JSON to confirm completion.\n"
+    "- Do not share raw flashcard text that has not been formatted via the tool.\n"
+)
+
+
+class GenerateRequest(BaseModel):
+    prompt: str = Field(..., min_length=1, description="Raw learner request to turn into study flashcards.")
+    model: str = Field(DEFAULT_MODEL, min_length=1, description="Gemini model to use for all calls.")
+    flashcard_count: int = Field(
+        DEFAULT_FLASHCARD_COUNT,
+        ge=1,
+        le=10,
+        description="Number of flashcards to create.",
+    )
+    api_key: str | None = Field(
+        default=None,
+        description="Optional Gemini API key. Falls back to GEMINI_API_KEY env var when omitted.",
+    )
+
+
+class Flashcard(BaseModel):
+    front: str
+    back: str
+
+
+class GenerateResponse(BaseModel):
+    cards: dict[str, Flashcard]
+    steps: list[str]
+    source_summary: str
+
+
+class ErrorResponse(BaseModel):
+    detail: str
 
 
 @lru_cache(maxsize=4)
 def _get_client(api_key: str) -> genai.Client:
-    """Cache clients per API key to avoid re-instantiation overhead."""
     return genai.Client(api_key=api_key)
 
 
 def _extract_text(response: Any) -> str:
-    """Pull the combined text from a Google GenAI response."""
     text = getattr(response, "text", None)
     if text:
         return str(text).strip()
 
-    # Fall back to iterating candidate parts. Handles both dicts and typed objects.
     candidates = getattr(response, "candidates", None)
     if candidates is None and isinstance(response, dict):
         candidates = response.get("candidates")
 
-    texts: list[str] = []
+    collected: list[str] = []
     if candidates:
         for candidate in candidates:
             content = getattr(candidate, "content", None)
@@ -76,128 +113,35 @@ def _extract_text(response: Any) -> str:
                 part_text = getattr(part, "text", None)
                 if part_text is None and isinstance(part, dict):
                     part_text = part.get("text")
-
                 if part_text:
-                    texts.append(str(part_text))
+                    collected.append(str(part_text))
 
-    return "".join(texts).strip()
-
-
-def strings_to_chars_to_int(string: str) -> list[int]:
-    return [ord(char) for char in string]
+    return "".join(collected).strip()
 
 
-def int_list_to_exponential_sum(values: list[int]) -> float:
-    return sum(math.exp(i) for i in values)
+def format_flash_card(payload: dict[str, Any]) -> dict[str, str]:
+    if not isinstance(payload, dict):
+        raise ValueError("Flashcard payload must be a JSON object.")
 
+    front = str(payload.get("front", "")).strip()
+    back = str(payload.get("back", "")).strip()
 
-def fibonacci_numbers(n: int) -> list[int]:
-    if n <= 0:
-        return []
-    sequence = [0, 1]
-    for _ in range(2, n):
-        sequence.append(sequence[-1] + sequence[-2])
-    return sequence[:n]
+    if not front:
+        raise ValueError("Flashcard front may not be empty.")
+    if not back:
+        back = front
 
-
-def format_flash_card(content: str) -> str:
-    """Format content into a simple Front/Back flash card."""
-    text = content.strip()
-    if not text:
-        return "Front: (empty)\nBack: (empty)"
-
-    # Heuristically split on the first blank line or newline.
-    if "\n\n" in text:
-        front_part, back_part = text.split("\n\n", 1)
-    elif "\n" in text:
-        front_part, back_part = text.split("\n", 1)
-    elif ":" in text:
-        front_part, back_part = text.split(":", 1)
-        front_part = front_part.strip()
-        back_part = back_part.strip()
-    else:
-        front_part, back_part = text, ""
-
-    front = front_part.strip() or "(empty)"
-    back = back_part.strip() or front
-
-    return f"Front: {front}\nBack: {back}"
-
-
-def _call_tool(func_name: str, raw_params: str) -> tuple[str, Any]:
-    tools: dict[str, Any] = {
-        "strings_to_chars_to_int": lambda param: strings_to_chars_to_int(param),
-        "int_list_to_exponential_sum": lambda param: int_list_to_exponential_sum(param),
-        "fibonacci_numbers": lambda param: fibonacci_numbers(param),
-        "format_flash_card": lambda param: format_flash_card(param),
-    }
-
-    if func_name not in tools:
-        raise ValueError(f"Function {func_name} not found")
-
-    if func_name in {"strings_to_chars_to_int", "format_flash_card"}:
-        parsed_params = raw_params.strip()
-        if len(parsed_params) >= 2 and parsed_params[0] == parsed_params[-1] and parsed_params[0] in {'"', "'"}:
-            parsed_params = parsed_params[1:-1]
-    elif func_name == "int_list_to_exponential_sum":
-        try:
-            parsed_params = ast.literal_eval(raw_params)
-        except (ValueError, SyntaxError) as exc:
-            raise ValueError(f"Unable to parse list arguments: {raw_params}") from exc
-        if not isinstance(parsed_params, list) or not all(isinstance(item, int) for item in parsed_params):
-            raise ValueError("int_list_to_exponential_sum expects a list of integers")
-    elif func_name == "fibonacci_numbers":
-        try:
-            parsed_params = int(raw_params)
-        except ValueError as exc:
-            raise ValueError(f"Unable to parse integer argument: {raw_params}") from exc
-    else:
-        parsed_params = raw_params
-
-    result = tools[func_name](parsed_params)
-    return raw_params, result
-
-
-def _build_agent_prompt(query: str, history: list[str]) -> str:
-    if not history:
-        return f"{AGENT_SYSTEM_PROMPT}\n\nQuery: {query.strip()}"
-
-    history_block = "\n\n".join(history)
-    return f"{AGENT_SYSTEM_PROMPT}\n\nQuery: {query.strip()}\n\n{history_block}\n\nWhat should I do next?"
+    return {"front": front, "back": back}
 
 
 def _parse_function_call(response_text: str) -> tuple[str, str]:
     try:
-        _, payload = response_text.split(":", 1)
-        func_name, raw_params = [item.strip() for item in payload.split("|", 1)]
+        prefix, payload = response_text.split(":", 1)
     except ValueError as exc:
-        raise ValueError(f"Malformed FUNCTION_CALL response: {response_text}") from exc
+        raise ValueError(f"Malformed agent response: {response_text}") from exc
 
+    func_name, raw_params = [part.strip() for part in payload.split("|", 1)]
     return func_name, raw_params
-
-
-class GenerateRequest(BaseModel):
-    prompt: str = Field(..., min_length=1, description="Fully composed prompt to forward to Gemini")
-    model: str = Field(DEFAULT_MODEL, min_length=1, description="Gemini model name")
-    api_key: str | None = Field(
-        default=None,
-        description="Optional Gemini API key. Falls back to GEMINI_API_KEY env var when omitted.",
-    )
-    max_iterations: int = Field(
-        DEFAULT_MAX_ITERATIONS,
-        ge=1,
-        le=10,
-        description="How many LLM/tool iterations to allow before giving up.",
-    )
-
-
-class GenerateResponse(BaseModel):
-    output: str = Field(..., description="Combined text output from Gemini")
-    steps: list[str] = Field(default_factory=list, description="Trace of LLM responses and tool invocations.")
-
-
-class ErrorResponse(BaseModel):
-    detail: str
 
 
 @app.get("/health", response_model=dict[str, str])
@@ -205,16 +149,22 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/generate", response_model=GenerateResponse, responses={400: {"model": ErrorResponse}, 502: {"model": ErrorResponse}})
+@app.post(
+    "/generate",
+    response_model=GenerateResponse,
+    responses={400: {"model": ErrorResponse}, 502: {"model": ErrorResponse}},
+)
 async def generate(request: GenerateRequest) -> GenerateResponse:
     api_key = (request.api_key or os.getenv("GEMINI_API_KEY") or "").strip()
     if not api_key:
-        raise HTTPException(status_code=400, detail="Gemini API key missing. Provide it in the request or set GEMINI_API_KEY.")
+        raise HTTPException(
+            status_code=400,
+            detail="Gemini API key missing. Provide it in the request or set GEMINI_API_KEY.",
+        )
 
     model_name = request.model.strip()
     if not model_name:
         raise HTTPException(status_code=400, detail="Model name may not be empty.")
-
     if not model_name.startswith("models/"):
         model_name = f"models/{model_name}"
 
@@ -223,57 +173,117 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Failed to initialize Gemini client: {exc}") from exc
 
-    history: list[str] = []
-    steps: list[str] = []
-    final_answer: str | None = None
+    # Step 1: Summarise the learner prompt into study notes.
+    summary_prompt = SUMMARY_PROMPT_TEMPLATE.format(user_prompt=request.prompt.strip())
+    try:
+        summary_response = await run_in_threadpool(
+            client.models.generate_content,
+            model=model_name,
+            contents=summary_prompt,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Gemini: {exc}") from exc
 
-    for iteration in range(request.max_iterations):
-        prompt = _build_agent_prompt(request.prompt, history)
+    study_summary = _extract_text(summary_response)
+    if not study_summary:
+        raise HTTPException(status_code=502, detail="Gemini returned an empty study summary.")
+
+    steps: list[str] = ["Step 1: Generated study summary from learner prompt."]
+
+    # Step 2: Multi-step agent to create formatted flashcards.
+    flashcard_goal = (
+        "Use the study summary below to create high quality flashcards."
+        f"\n\nStudy summary:\n{study_summary}\n"
+    )
+    system_prompt = AGENT_SYSTEM_PROMPT.format(flashcard_count=request.flashcard_count)
+    history: list[str] = []
+    cards: dict[str, Flashcard] = {}
+    card_counter = 0
+
+    for iteration in range(AGENT_MAX_ITERATIONS):
+        history_block = "\n\n".join(history)
+        if history_block:
+            agent_prompt = f"{system_prompt}\n\nQuery: {flashcard_goal}\n\n{history_block}\n\nWhat should I do next?"
+        else:
+            agent_prompt = f"{system_prompt}\n\nQuery: {flashcard_goal}"
 
         try:
-            response = await run_in_threadpool(
+            agent_response = await run_in_threadpool(
                 client.models.generate_content,
                 model=model_name,
-                contents=prompt,
+                contents=agent_prompt,
             )
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"Failed to reach Gemini: {exc}") from exc
+            raise HTTPException(status_code=502, detail=f"Failed to reach Gemini during agent run: {exc}") from exc
 
-        response_text = _extract_text(response)
-        if not response_text:
-            raise HTTPException(status_code=502, detail="Gemini returned an empty response.")
+        agent_text = _extract_text(agent_response)
+        if not agent_text:
+            raise HTTPException(status_code=502, detail="Gemini agent returned an empty response.")
 
-        steps.append(f"Iteration {iteration + 1} LLM: {response_text}")
+        steps.append(f"Step 2.{iteration + 1}: Agent response -> {agent_text}")
+        normalized = agent_text.strip()
 
-        normalized = response_text.strip()
-        if normalized.startswith("FINAL_ANSWER:"):
-            final_answer = normalized.split(":", 1)[1].strip()
+        if normalized.startswith("FINAL_JSON:"):
+            if len(cards) != request.flashcard_count:
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        "Gemini agent signaled completion without producing the expected number of flashcards."
+                    ),
+                )
             break
 
         if normalized.startswith("FUNCTION_CALL:"):
             try:
                 func_name, raw_params = _parse_function_call(normalized)
-                original_params, tool_result = _call_tool(func_name, raw_params)
             except ValueError as exc:
                 raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-            steps.append(
-                f"Iteration {iteration + 1} Tool: {func_name}({original_params}) -> {tool_result}"
-            )
+            if func_name != "format_flash_card":
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Unsupported tool requested: {func_name}",
+                )
+
+            try:
+                payload = json.loads(raw_params)
+            except json.JSONDecodeError as exc:
+                raise HTTPException(status_code=502, detail=f"Invalid flashcard JSON: {exc}") from exc
+
+            try:
+                formatted = format_flash_card(payload)
+            except ValueError as exc:
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+            card_counter += 1
+            card_id = payload.get("id") or f"card_{card_counter}"
+            cards[card_id] = Flashcard(**formatted)
+
             history.append(
-                f"In iteration {iteration + 1} you called {func_name} with {original_params} parameters, and the function returned {tool_result}."
+                f"In iteration {iteration + 1}, you formatted flashcard {card_id}: front='{formatted['front']}' back='{formatted['back']}'."
             )
+            steps.append(
+                f"Step 2.{iteration + 1}: Stored flashcard {card_id} with front='{formatted['front']}'."
+            )
+
+            if len(cards) == request.flashcard_count:
+                history.append(
+                    "All required flashcards are prepared. Respond with FINAL_JSON to confirm completion."
+                )
+
             continue
 
         raise HTTPException(
             status_code=502,
-            detail="Gemini returned an unexpected response format; expected FUNCTION_CALL or FINAL_ANSWER.",
+            detail="Gemini agent returned an unexpected response format.",
+        )
+    else:
+        raise HTTPException(
+            status_code=502,
+            detail="Gemini agent did not finish within the allowed iterations.",
         )
 
-    if final_answer is None:
-        raise HTTPException(status_code=502, detail="Gemini agent did not return a final answer within iteration limit.")
-
-    return GenerateResponse(output=final_answer, steps=steps)
+    return GenerateResponse(cards=cards, steps=steps, source_summary=study_summary)
 
 
 if __name__ == "__main__":

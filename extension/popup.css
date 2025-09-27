@@ -244,6 +244,50 @@ h2 {
   outline-offset: 2px;
 }
 
+.flashcard-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+.flashcard-summary,
+.flashcard-steps {
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  padding: 8px 12px;
+  color: var(--fg);
+}
+
+.flashcard-summary > p {
+  margin: 8px 0 0;
+}
+
+.flashcard-steps > ol {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.flashcard-step-list li + li {
+  margin-top: 4px;
+}
+
+.flashcard-selection-note {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+.flashcard-label {
+  display: block;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(248, 250, 252, 0.65);
+  margin-bottom: 6px;
+}
+
 .flashcard {
   position: relative;
   border: none;

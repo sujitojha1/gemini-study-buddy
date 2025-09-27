@@ -1,4 +1,5 @@
 const MODEL = "gemini-2.0-flash";
+const FLASHCARD_COUNT = 5;
 const LOCAL_API_BASE = "http://127.0.0.1:8000";
 const LOCAL_GENERATE_ENDPOINT = `${LOCAL_API_BASE}/generate`;
 
@@ -8,20 +9,16 @@ const statusEl = document.getElementById("status");
 const resultSection = document.getElementById("resultSection");
 const resultEl = document.getElementById("result");
 const loadingTemplate = document.getElementById("loadingTemplate");
-
-const actionButtons = Array.from(document.querySelectorAll("button[data-action]"));
+const flashcardButton = document.getElementById("flashcardBtn");
 
 init();
 
-async function init() {
-  actionButtons.forEach((button) => {
-    button.addEventListener("click", () => handleGenerate(button.dataset.action));
-  });
-
+function init() {
+  flashcardButton.addEventListener("click", handleGenerate);
   setStatus("Highlight what matters or just run it on the full page.");
 }
 
-async function handleGenerate(action) {
+async function handleGenerate() {
   try {
     setButtonsDisabled(true);
     setStatus("Collecting the page context...", { loading: true });
@@ -32,13 +29,10 @@ async function handleGenerate(action) {
     }
 
     setStatus("Talking with Gemini...", { loading: true });
-    const prompt = buildPrompt(action, contextInfo);
-    const output = await callGemini(prompt);
-    showResult(output, action);
-    const doneMessage = action === "flashcards"
-      ? "Cards ready! Click a card to reveal the answer."
-      : "Done! Review the study material below.";
-    setStatus(doneMessage);
+    const prompt = buildPrompt(contextInfo);
+    const payload = await callGemini(prompt);
+    showResult(payload, contextInfo);
+    setStatus("Cards ready! Click a card to reveal the answer.");
   } catch (error) {
     console.error(error);
     const message = error?.message || "Something went wrong while generating.";
@@ -49,9 +43,7 @@ async function handleGenerate(action) {
 }
 
 function setButtonsDisabled(disabled) {
-  actionButtons.forEach((button) => {
-    button.disabled = disabled;
-  });
+  flashcardButton.disabled = disabled;
 }
 
 function setStatus(message, { loading = false, error = false } = {}) {
@@ -107,26 +99,7 @@ async function collectPageContext() {
   }
 }
 
-function showResult(output, action) {
-  resultEl.innerHTML = "";
-  resultEl.classList.remove("has-flashcards");
-
-  if (action === "flashcards") {
-    const cards = parseFlashcards(output);
-    if (cards.length > 0) {
-      resultEl.classList.add("has-flashcards");
-      renderFlashcards(cards);
-    } else {
-      resultEl.textContent = output;
-    }
-  } else {
-    resultEl.textContent = output;
-  }
-
-  resultSection.hidden = false;
-}
-
-function buildPrompt(action, contextInfo) {
+function buildPrompt(contextInfo) {
   const { text, truncated, usedSelection } = contextInfo;
   const selectionNote = usedSelection
     ? "\nThe learner highlighted specific text. Prioritize the highlighted material while still using broader context when relevant."
@@ -135,32 +108,14 @@ function buildPrompt(action, contextInfo) {
     ? "\nThe context was truncated for length. Respond using only the provided portion."
     : "";
 
-  let task;
-  switch (action) {
-    case "flashcards":
-      task = `Produce 6-10 concise flashcards formatted as Markdown.
-For each card write a bold question line followed by an indented answer line that learners can quickly review.
-Vary between concept, definition, and application questions.`;
-      break;
-    case "quiz":
-      task = `Generate a short self-check quiz in Markdown with 5 multiple-choice questions.
-For each question provide four answer options labeled A-D and mark the correct answer on a new line starting with "Answer:".
-Include a one-sentence explanation after each answer to reinforce learning.`;
-      break;
-    default:
-      throw new Error("Unsupported action requested.");
-  }
-
-  return `You are Gemini Study Buddy, an expert AI study assistant powered by Google Gemini Flash 2.0.
-Use the context provided to craft the requested study aid.${selectionNote}${truncationNote}
+  return `Create high-quality study flashcards for a learner using the material below.
+Each card should cover a single concept, definition, or application in a way that encourages active recall.
+${selectionNote}${truncationNote}
 
 Context:
 """
 ${text}
-"""
-
-Task:
-${task}`;
+"""`;
 }
 
 async function callGemini(prompt) {
@@ -174,6 +129,7 @@ async function callGemini(prompt) {
       body: JSON.stringify({
         prompt,
         model: MODEL,
+        flashcard_count: FLASHCARD_COUNT,
       }),
     });
   } catch (error) {
@@ -188,13 +144,42 @@ async function callGemini(prompt) {
     throw new Error(errorMessage);
   }
 
-  const text = payload?.output?.trim?.();
-
-  if (!text) {
-    throw new Error("Local API returned an empty response. Check the FastAPI logs and try again.");
+  if (!payload || typeof payload !== "object") {
+    throw new Error("Local API returned an unexpected response.");
   }
 
-  return text;
+  return payload;
+}
+
+function showResult(payload, contextInfo) {
+  resultEl.innerHTML = "";
+  resultEl.classList.remove("has-flashcards");
+
+  const cards = normalizeFlashcards(payload?.cards);
+  if (!cards.length) {
+    resultEl.textContent = "Gemini did not return any flashcards. Try again with a smaller selection.";
+    resultSection.hidden = false;
+    return;
+  }
+
+  resultEl.classList.add("has-flashcards");
+  renderFlashcards(cards);
+  renderMetadata(payload, contextInfo);
+  resultSection.hidden = false;
+}
+
+function normalizeFlashcards(cardsObject) {
+  if (!cardsObject || typeof cardsObject !== "object") {
+    return [];
+  }
+
+  return Object.entries(cardsObject)
+    .map(([id, value]) => ({
+      id,
+      front: toCleanString(value?.front),
+      back: toCleanString(value?.back),
+    }))
+    .filter((card) => card.front);
 }
 
 function renderFlashcards(cards) {
@@ -234,9 +219,9 @@ function renderFlashcards(cards) {
 
   const updateCard = (index) => {
     currentIndex = index;
-    const { question, answer } = cards[index];
-    const questionHtml = escapeHtml(question).replace(/\n/g, "<br />");
-    const answerHtml = escapeHtml(answer)
+    const { front, back, id } = cards[index];
+    const frontHtml = escapeHtml(front).replace(/\n/g, "<br />");
+    const backHtml = escapeHtml(back)
       .replace(/\n{2,}/g, "<br /><br />")
       .replace(/\n/g, "<br />");
 
@@ -244,8 +229,11 @@ function renderFlashcards(cards) {
     card.setAttribute("aria-pressed", "false");
     card.innerHTML = `
       <div class="flashcard-inner">
-        <div class="flashcard-face flashcard-front">${questionHtml}</div>
-        <div class="flashcard-face flashcard-back">${answerHtml}</div>
+        <div class="flashcard-face flashcard-front">
+          <span class="flashcard-label">${escapeHtml(id)}</span>
+          ${frontHtml}
+        </div>
+        <div class="flashcard-face flashcard-back">${backHtml}</div>
       </div>
     `;
 
@@ -259,7 +247,7 @@ function renderFlashcards(cards) {
     nextButton.disabled = index === cards.length - 1;
   };
 
-  cards.forEach((_, index) => {
+  cards.forEach((cardData, index) => {
     const dot = document.createElement("button");
     dot.type = "button";
     dot.className = "flashcard-dot";
@@ -300,54 +288,60 @@ function renderFlashcards(cards) {
   updateCard(0);
 }
 
-function parseFlashcards(markdown) {
-  const lines = markdown.split(/\r?\n/);
-  const cards = [];
+function renderMetadata(payload, contextInfo) {
+  const extras = document.createElement("div");
+  extras.className = "flashcard-meta";
 
-  let currentQuestion = null;
-  let answerLines = [];
+  const summaryText = toCleanString(payload?.source_summary);
+  if (summaryText) {
+    const summaryDetails = document.createElement("details");
+    summaryDetails.className = "flashcard-summary";
+    summaryDetails.open = false;
 
-  const flush = () => {
-    if (!currentQuestion) {
-      return;
-    }
-    const answerText = answerLines.join("\n").trim();
-    cards.push({
-      question: currentQuestion,
-      answer: answerText || "No answer provided.",
+    const summaryTitle = document.createElement("summary");
+    summaryTitle.textContent = "View study summary";
+
+    const summaryBody = document.createElement("p");
+    summaryBody.textContent = summaryText;
+
+    summaryDetails.appendChild(summaryTitle);
+    summaryDetails.appendChild(summaryBody);
+    extras.appendChild(summaryDetails);
+  }
+
+  if (Array.isArray(payload?.steps) && payload.steps.length) {
+    const stepsDetails = document.createElement("details");
+    stepsDetails.className = "flashcard-steps";
+
+    const stepsTitle = document.createElement("summary");
+    stepsTitle.textContent = "See Gemini steps";
+
+    const stepsList = document.createElement("ol");
+    stepsList.className = "flashcard-step-list";
+
+    payload.steps.forEach((step) => {
+      const li = document.createElement("li");
+      li.textContent = toCleanString(step);
+      stepsList.appendChild(li);
     });
-    currentQuestion = null;
-    answerLines = [];
-  };
 
-  lines.forEach((line) => {
-    const questionMatch = line.match(/^\*\*(.+?)\*\*/);
-    if (questionMatch) {
-      if (currentQuestion) {
-        flush();
-      }
-      currentQuestion = cleanQuestion(questionMatch[1].trim());
-      answerLines = [];
-      return;
-    }
+    stepsDetails.appendChild(stepsTitle);
+    stepsDetails.appendChild(stepsList);
+    extras.appendChild(stepsDetails);
+  }
 
-    if (currentQuestion) {
-      if (line.trim() === "") {
-        if (answerLines.length > 0) {
-          answerLines.push("");
-        }
-        return;
-      }
+  if (contextInfo?.usedSelection) {
+    const selectionTag = document.createElement("p");
+    selectionTag.className = "flashcard-selection-note";
+    selectionTag.textContent = "Flashcards prioritized your highlighted text.";
+    extras.appendChild(selectionTag);
+  }
 
-      const trimmed = line.trim();
-      const normalized = trimmed.replace(/^[-*]\s+/, "• ");
-      answerLines.push(normalized);
-    }
-  });
+  if (!extras.childNodes.length) {
+    return;
+  }
 
-  flush();
-
-  return cards;
+  resultEl.appendChild(extras);
 }
 
 function escapeHtml(text) {
@@ -356,10 +350,9 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-function cleanQuestion(text) {
-  let cleaned = text;
-  cleaned = cleaned.replace(/^(?:q\d+[:.)-]?\s*)/i, "");
-  cleaned = cleaned.replace(/^\d+\s*[).:-]?\s*/, "");
-  cleaned = cleaned.replace(/^(?:[-*•]\s*)/, "");
-  return cleaned.trim();
+function toCleanString(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  return String(value).trim();
 }
