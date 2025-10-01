@@ -197,7 +197,6 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
     )
 
     api_key = os.getenv("GEMINI_API_KEY")
-    print("stage1")
 
     if not api_key:
         raise HTTPException(
