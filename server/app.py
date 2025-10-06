@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List
 
 from google import genai
 from dotenv import load_dotenv
@@ -31,10 +32,17 @@ FLASHCARD_COUNT = 5
 LOG_PATH = Path(__file__).resolve().parent / "logs" / f"agent_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 LOG_LINE_WIDTH = 72
 
+api_key = os.getenv("GEMINI_API_KEY")
+
+if not api_key:
+    raise HTTPException(
+        status_code=400,
+        detail="Gemini API key missing. Provide it in the request or set GEMINI_API_KEY.",
+    )
+
 SUMMARY_PROMPT_TEMPLATE = (
     "Extract the essential study notes from the learner material below. "
     "Focus on crisp facts, definitions, formulas, and conceptual explanations.\n"
-    "{selection_note}{truncation_note}\n"
     "Learner material:\n{page_text}"
 )
 
@@ -67,7 +75,6 @@ class Flashcard(BaseModel):
 class GenerateResponse(BaseModel):
     cards: dict[str, Flashcard]
     steps: list[str]
-    source_summary: str
 
 
 class ErrorResponse(BaseModel):
@@ -166,7 +173,123 @@ def _parse_flashcards(raw_text: str, max_cards: int) -> list[Flashcard]:
     return flashcards
 
 
+def rate_content_quality(
+    content: str
+) -> int:
+    """
+    Returns an integer 1–10:
+      1–4  => mostly ephemeral mention/news with low depth
+      5–7  => some explanatory value
+      8–10 => strong knowledge-building (concepts, mechanisms, transferable insight)
+    """
+    prompt = f"""
+    You are a strict rater of learning value.
 
+    Task: Rate the following text on a 1–10 scale for how *useful it is to gain durable knowledge* (vs. being mere headlines/news).
+
+    Guidelines:
+    - 1–4: brief mentions, announcements, time-bound news
+    - 5–7: some explanation, limited depth or transfer
+    - 8–10: clear concepts, mechanisms, examples, definitions, procedures
+
+    Return ONLY the integer.
+
+    Text:
+    \"\"\"{content}\"
+    \"\"\"
+    """
+    try:
+        client = _get_client(api_key)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to initialize Gemini client: {exc}") from exc
+    
+    out = client.models.generate_content(model="gemini-2.0-flash",contents=prompt)
+    m = re.search(r"\b(10|[1-9])\b", out.text)
+    return int(m.group(1)) if m else 5
+
+def generate_flashcards_json(
+    study_summary: str
+) -> List[Dict[str, str]]:
+    """
+    Produces up to `max_cards` active-recall flashcards as a STRICT JSON array:
+    [
+      {"front": "...", "back": "..."},
+      ...
+    ]
+    - front: <=120 chars (question/prompt)
+    - back:  <=240 chars (concise answer)
+    If the model returns extra text, we attempt to extract and validate the array.
+    """
+
+    max_cards = 5
+    prompt = f"""
+You are helping a learner revise.
+
+Create up to {max_cards} high-quality flashcards using the study summary below.
+
+Respond ONLY with a JSON array. Each item must contain:
+  - "front": a short active-recall question or prompt (<= 120 chars).
+  - "back": the concise answer or explanation (<= 240 chars).
+
+Do not add commentary before or after the JSON.
+
+Study summary:
+\"\"\"{study_summary}\"
+\"\"\"
+"""
+    try:
+        client = _get_client(api_key)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to initialize Gemini client: {exc}") from exc
+    
+    out = client.models.generate_content(model="gemini-2.0-flash",contents=prompt)
+    return out.text
+
+def infer_information_hierarchy_and_jobs_simple(
+    content: str
+) -> str:
+    """
+    Returns a plain text tree-like concept hierarchy plus
+    a final line: "Note about job function: <>, <>"
+    """
+    prompt = f"""
+Analyze the following text.
+
+1. Build a simple tree-like concept hierarchy (<= 3 levels). 
+   Format with indentation using dashes or arrows, like:
+
+Topic
+- Subtopic
+  - Detail
+
+2. At the end, add one line:
+"Note about job function: <job1>, <job2>"
+
+Keep it brief and textual. Do not return JSON.
+
+Text:
+\"\"\"{content}\"\"\"
+"""
+    try:
+        client = _get_client(api_key)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to initialize Gemini client: {exc}") from exc
+    
+    out = client.models.generate_content(model="gemini-2.0-flash",contents=prompt)
+    return out.text.strip()
+
+def function_caller(func_name, params):
+    """Simple function caller that maps function names to actual functions"""
+    function_map = {
+        "rate_content_quality": rate_content_quality,
+        "infer_information_hierarchy_and_jobs_simple": infer_information_hierarchy_and_jobs_simple,
+        "generate_flashcards_json": generate_flashcards_json
+    }
+    
+    if func_name not in function_map:
+        raise ValueError(f"Function {func_name} not found")
+
+    return function_map[func_name](params)
 
 @app.get("/health", response_model=dict[str, str])
 async def health() -> dict[str, str]:
@@ -182,27 +305,17 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
     # Capture a trimmed version of the learner content to keep logs readable.
     page_context = request.page_context
     request_text = page_context.text.strip()
-    preview = " ".join(request_text.split())[:160]
-    if len(request_text) > 160:
-        preview = f"{preview}..."
 
     # Log a header so each request is easy to spot in the rolling agent history file.
     _log_lines(
         [
             f"{'Gemini Study Buddy Request':^{LOG_LINE_WIDTH}}",
             f"Started: {datetime.now().isoformat()}",
-            f"Preview: {preview}" if preview else "Preview: [empty]",
         ],
         header=True,
     )
 
-    api_key = os.getenv("GEMINI_API_KEY")
 
-    if not api_key:
-        raise HTTPException(
-            status_code=400,
-            detail="Gemini API key missing. Provide it in the request or set GEMINI_API_KEY.",
-        )
 
     model_name = DEFAULT_MODEL
 
@@ -214,70 +327,119 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
     # `steps` is returned to the client so the UI can display high-level progress.
     steps: list[str] = []
     cards: dict[str, Flashcard] = {}
-    summary_text = ""
-    selection_note = ""
-    if page_context.used_selection:
-        selection_note = (
-            "The learner highlighted specific text. Prioritize the highlighted material while still using the broader context when relevant.\n"
-        )
-
-    truncation_note = ""
-    if page_context.truncated:
-        truncation_note = (
-            "The context was truncated for length. Respond using only the provided portion.\n"
-        )
-
-    summary_prompt = SUMMARY_PROMPT_TEMPLATE.format(
-        page_text=request_text,
-        selection_note=selection_note,
-        truncation_note=truncation_note,
-    )
-    cards_prompt = ""
-    flashcard_raw = ""
-
 
     try:
-        # Offload Gemini calls to a worker thread to keep the event loop free for I/O.
-        summary_response = await run_in_threadpool(
-            client.models.generate_content,
-            model=model_name,
-            contents=summary_prompt,
-        )
-        summary_raw = _extract_text(summary_response)
+        max_iterations = 4
+        iteration = 0
+        iteration_response: list[str] = []
+        flashcards: list[Flashcard] | None = None
+
+        system_prompt = """You are learner assistant agent preparing flashcards in iterations. Intention of the agent is to help learner with meaninful content to grasp. 
+        Respond with EXACTLY ONE of these formats:
+        1. FUNCTION_CALL: python_function_name|input
+        2. FINAL_ANSWER: [json]
+
+        where python_function_name is one of the followin:
+        1. rate_content_quality(string) it takes page content as input and returns a page rating from 1-10
+        2. infer_information_hierarchy_and_jobs_simple(string) it takes page content as input and returns a simple tree-like concept hierarchy (<= 3 levels) and a final line: "Note about job function: <>, <>"
+        3. generate_flashcards_json(string) it takes study summary as input and returns a JSON array of flashcards [{"front": "...", "back": "..."}, ...]
+        DO NOT include multiple responses. Give ONE response at a time."""
+
+        base_query = request_text
+        current_query = base_query
+
+        while iteration < max_iterations:
+            print(f"\n--- Iteration {iteration + 1} ---")
+
+            prompt = f"{system_prompt}\n\nQuery: web page content - {current_query}"
+            response = await run_in_threadpool(
+                client.models.generate_content,
+                model=model_name,
+                contents=prompt,
+            )
+
+            response_text = (response.text or "").strip()
+            print(f"LLM Response: {response_text}")
+
+            if response_text.startswith("FUNCTION_CALL:"):
+                try:
+                    _, function_info = response_text.split(":", 1)
+                    func_name, params = [x.strip() for x in function_info.split("|", 1)]
+                except ValueError as exc:
+                    raise HTTPException(status_code=502, detail="Gemini returned an invalid function call.") from exc
+
+                try:
+                    iteration_result = await run_in_threadpool(function_caller, func_name, params)
+                except Exception as exc:
+                    raise HTTPException(status_code=502, detail=f"Function {func_name} failed: {exc}") from exc
+
+                iteration_response.append(
+                    f"In the {iteration + 1} iteration you called {func_name} with {params} parameters, and the function returned {iteration_result}."
+                )
+                current_query = "\n\n".join(
+                    [base_query, " ".join(iteration_response), "What should I do next?"]
+                )
+                iteration += 1
+                continue
+
+            if response_text.startswith("FINAL_ANSWER:"):
+                final_payload = response_text[len("FINAL_ANSWER:") :].strip()
+                if not final_payload:
+                    raise HTTPException(status_code=502, detail="Gemini returned empty flashcard content.")
+
+                try:
+                    flashcards = _parse_flashcards(final_payload, FLASHCARD_COUNT)
+                except ValueError as exc:
+                    raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+                print("\n=== Agent Execution Complete ===")
+                break
+
+            raise HTTPException(status_code=502, detail="Gemini response missing FUNCTION_CALL or FINAL_ANSWER prefix.")
+
+        if flashcards is None:
+            raise HTTPException(status_code=502, detail="Gemini agent did not produce a final answer.")
+
+
+
+
+        # summary_prompt = SUMMARY_PROMPT_TEMPLATE.format(
+        #     page_text=request_text
+        # )
+        # cards_prompt = ""
+        # flashcard_raw = ""
+
+
+    
+        # # Offload Gemini calls to a worker thread to keep the event loop free for I/O.
+        # summary_response = await run_in_threadpool(
+        #     client.models.generate_content,
+        #     model=model_name,
+        #     contents=summary_prompt,
+        # )
+        # summary_raw = _extract_text(summary_response)
         
 
-        if not summary_raw:
-            raise HTTPException(status_code=502, detail="Gemini returned an empty study summary.")
+        # if not summary_raw:
+        #     raise HTTPException(status_code=502, detail="Gemini returned an empty study summary.")
 
-        summary_text = summary_raw.strip()
-        summary_status = "Status: Study summary received from Gemini."
-        steps.append("Study summary received from Gemini.")
-        _log_lines([summary_status])
-
-
-        cards_prompt = FLASHCARD_PROMPT_TEMPLATE.format(
-            flashcard_count=FLASHCARD_COUNT,
-            study_summary=summary_text,
-        )
+        # summary_text = summary_raw.strip()
+        # summary_status = "Status: Study summary received from Gemini."
+        # steps.append("Study summary received from Gemini.")
+        # _log_lines([summary_status])
 
 
-        flashcard_response = await run_in_threadpool(
-            client.models.generate_content,
-            model=model_name,
-            contents=cards_prompt,
-        )
-        flashcard_raw = _extract_text(flashcard_response)
-        
-
-        if not flashcard_raw:
-            raise HTTPException(status_code=502, detail="Gemini returned empty flashcard content.")
+        # cards_prompt = FLASHCARD_PROMPT_TEMPLATE.format(
+        #     flashcard_count=FLASHCARD_COUNT,
+        #     study_summary=summary_text,
+        # )
 
 
-        try:
-            flashcards = _parse_flashcards(flashcard_raw, FLASHCARD_COUNT)
-        except ValueError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-
+        # flashcard_response = await run_in_threadpool(
+        #     client.models.generate_content,
+        #     model=model_name,
+        #     contents=cards_prompt,
+        # )
         cards = {
             f"card_{index}": card
             for index, card in enumerate(flashcards, start=1)
@@ -287,7 +449,7 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
         steps.append("Flashcards generated successfully.")
         _log_lines([cards_status])
 
-        response_payload = GenerateResponse(cards=cards, steps=steps, source_summary=summary_text)
+        response_payload = GenerateResponse(cards=cards, steps=steps)
         return response_payload
 
     except HTTPException as exc:
