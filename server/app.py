@@ -75,6 +75,8 @@ class Flashcard(BaseModel):
 class GenerateResponse(BaseModel):
     cards: dict[str, Flashcard]
     steps: list[str]
+    content_rating: int | None = None
+    information_hierarchy: str | None = None
 
 
 class ErrorResponse(BaseModel):
@@ -333,6 +335,8 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
         iteration = 0
         iteration_response: list[str] = []
         flashcards: list[Flashcard] | None = None
+        content_rating: int | None = None
+        information_hierarchy: str | None = None
 
         system_prompt = """You are a learning-assistant agent preparing flashcards in iterations.
 Your goal: help the learner deeply grasp content meaningfully.
@@ -386,6 +390,14 @@ FINAL_ANSWER: [{"front":"What is AI?","back":"AI is..."}]
                     print(f"Results :{iteration_result} ")
                 except Exception as exc:
                     raise HTTPException(status_code=502, detail=f"Function {func_name} failed: {exc}") from exc
+
+                if func_name == "rate_content_quality":
+                    try:
+                        content_rating = int(iteration_result)
+                    except (TypeError, ValueError):
+                        content_rating = None
+                elif func_name == "infer_information_hierarchy_and_jobs_simple":
+                    information_hierarchy = str(iteration_result).strip()
 
                 iteration_response.append(
                     f"In the {iteration + 1} iteration you called {func_name} with {params} parameters, and the function returned {iteration_result}."
@@ -463,7 +475,12 @@ FINAL_ANSWER: [{"front":"What is AI?","back":"AI is..."}]
         steps.append("Flashcards generated successfully.")
         _log_lines([cards_status])
 
-        response_payload = GenerateResponse(cards=cards, steps=steps)
+        response_payload = GenerateResponse(
+            cards=cards,
+            steps=steps,
+            content_rating=content_rating,
+            information_hierarchy=information_hierarchy,
+        )
         return response_payload
 
     except HTTPException as exc:

@@ -9,6 +9,7 @@ const MAX_CONTEXT_LENGTH = 6000;
 const statusEl = document.getElementById("status");
 const resultSection = document.getElementById("resultSection");
 const resultEl = document.getElementById("result");
+const metadataEl = document.getElementById("metadata");
 const loadingTemplate = document.getElementById("loadingTemplate");
 const flashcardButton = document.getElementById("flashcardBtn");
 
@@ -152,6 +153,7 @@ function showResult(payload, contextInfo, cardCount) {
   // Reset the results pane before rendering the new content.
   resultEl.innerHTML = "";
   resultEl.classList.remove("has-flashcards");
+  clearMetadata();
 
   const cards = normalizeFlashcards(payload?.cards);
   if (!cards.length) {
@@ -289,7 +291,246 @@ function renderFlashcards(cards) {
   updateCard(0);
 }
 
-function renderMetadata() {}
+function renderMetadata(payload, contextInfo) {
+  if (!metadataEl) {
+    return;
+  }
+
+  clearMetadata();
+
+  const rating = typeof payload?.content_rating === "number" ? payload.content_rating : null;
+  const rawHierarchy = toCleanString(payload?.information_hierarchy);
+  const { hierarchy, jobNote } = parseInformationHierarchy(rawHierarchy);
+
+  const selectionNotes = [];
+  if (contextInfo?.usedSelection) {
+    selectionNotes.push("Generated from your selection.");
+  }
+  if (contextInfo?.truncated) {
+    selectionNotes.push(`Context truncated to ${MAX_CONTEXT_LENGTH} characters.`);
+  }
+
+  if (rating === null && !hierarchy && !jobNote && !selectionNotes.length) {
+    return;
+  }
+
+  const metaWrapper = document.createElement("div");
+  metaWrapper.className = "flashcard-meta";
+
+  if (rating !== null) {
+    const ratingCard = document.createElement("div");
+    ratingCard.className = "flashcard-summary meta-card";
+
+    const heading = document.createElement("h2");
+    heading.textContent = "Learning Value";
+
+    const ratingRow = document.createElement("div");
+    ratingRow.className = "meta-rating-row";
+
+    const ratingScore = document.createElement("span");
+    ratingScore.className = "meta-rating-score";
+    ratingScore.textContent = `${rating}/10`;
+
+    const ratingDescription = document.createElement("span");
+    ratingDescription.className = "meta-rating-description";
+    ratingDescription.textContent = describeRating(rating);
+
+    ratingRow.appendChild(ratingScore);
+    ratingRow.appendChild(ratingDescription);
+
+    ratingCard.appendChild(heading);
+    ratingCard.appendChild(ratingRow);
+    metaWrapper.appendChild(ratingCard);
+  }
+
+  if (hierarchy || jobNote) {
+    const hierarchyCard = document.createElement("div");
+    hierarchyCard.className = "flashcard-summary meta-card";
+
+    const heading = document.createElement("h2");
+    heading.textContent = "Information Hierarchy";
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "hierarchy-button";
+    button.textContent = "View structure";
+    button.addEventListener("click", () => showHierarchyModal(hierarchy, jobNote));
+
+    hierarchyCard.appendChild(heading);
+    hierarchyCard.appendChild(button);
+
+    if (jobNote) {
+      const noteEl = document.createElement("p");
+      noteEl.className = "meta-note";
+      noteEl.textContent = jobNote;
+      hierarchyCard.appendChild(noteEl);
+    }
+
+    metaWrapper.appendChild(hierarchyCard);
+  }
+
+  if (selectionNotes.length) {
+    const noteEl = document.createElement("p");
+    noteEl.className = "flashcard-selection-note";
+    noteEl.textContent = selectionNotes.join(" ");
+    metaWrapper.appendChild(noteEl);
+  }
+
+  metadataEl.appendChild(metaWrapper);
+  metadataEl.hidden = false;
+}
+
+function clearMetadata() {
+  if (!metadataEl) {
+    return;
+  }
+  metadataEl.innerHTML = "";
+  metadataEl.hidden = true;
+}
+
+function describeRating(score) {
+  if (score >= 8) {
+    return "High depth content - great for learning.";
+  }
+  if (score >= 5) {
+    return "Moderate depth - useful but could go deeper.";
+  }
+  if (score >= 1) {
+    return "Light coverage - mostly surface-level info.";
+  }
+  return "No rating available.";
+}
+
+function parseInformationHierarchy(rawValue) {
+  if (!rawValue) {
+    return { hierarchy: "", jobNote: "" };
+  }
+
+  const marker = "note about job function:";
+  const lowerValue = rawValue.toLowerCase();
+  const markerIndex = lowerValue.lastIndexOf(marker);
+
+  if (markerIndex === -1) {
+    return { hierarchy: rawValue.trim(), jobNote: "" };
+  }
+
+  const hierarchy = rawValue.slice(0, markerIndex).trim();
+  const jobNote = rawValue.slice(markerIndex).trim();
+  return { hierarchy, jobNote };
+}
+
+let activeHierarchyModal = null;
+
+function showHierarchyModal(hierarchyText, jobNote) {
+  closeHierarchyModal();
+
+  if (!hierarchyText && !jobNote) {
+    return;
+  }
+
+  const overlay = document.createElement("div");
+  overlay.className = "hierarchy-modal-overlay";
+
+  const modal = document.createElement("div");
+  modal.className = "hierarchy-modal";
+  modal.setAttribute("role", "dialog");
+  modal.setAttribute("aria-modal", "true");
+  modal.setAttribute("aria-labelledby", "hierarchyModalTitle");
+  modal.tabIndex = -1;
+
+  const header = document.createElement("div");
+  header.className = "hierarchy-modal-header";
+
+  const title = document.createElement("h2");
+  title.id = "hierarchyModalTitle";
+  title.textContent = "Information Hierarchy";
+
+  const closeButton = document.createElement("button");
+  closeButton.type = "button";
+  closeButton.className = "hierarchy-modal-close";
+  closeButton.setAttribute("aria-label", "Close information hierarchy");
+  closeButton.innerHTML = "&times;";
+
+  header.appendChild(title);
+  header.appendChild(closeButton);
+
+  const body = document.createElement("div");
+  body.className = "hierarchy-modal-body";
+
+  if (hierarchyText) {
+    const hierarchyContent = document.createElement("div");
+    hierarchyContent.className = "hierarchy-modal-tree";
+    hierarchyContent.innerHTML = formatHierarchyForModal(hierarchyText);
+    body.appendChild(hierarchyContent);
+  }
+
+  if (jobNote) {
+    const jobNoteEl = document.createElement("p");
+    jobNoteEl.className = "hierarchy-modal-note";
+    jobNoteEl.textContent = jobNote;
+    body.appendChild(jobNoteEl);
+  }
+
+  modal.appendChild(header);
+  modal.appendChild(body);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  const onOverlayClick = (event) => {
+    if (event.target === overlay) {
+      closeHierarchyModal();
+    }
+  };
+
+  const onClose = () => {
+    closeHierarchyModal();
+  };
+
+  overlay.addEventListener("click", onOverlayClick);
+  closeButton.addEventListener("click", onClose);
+
+  requestAnimationFrame(() => {
+    overlay.classList.add("is-visible");
+    modal.focus();
+  });
+
+  document.addEventListener("keydown", handleHierarchyModalKeydown);
+  activeHierarchyModal = overlay;
+}
+
+function closeHierarchyModal() {
+  if (!activeHierarchyModal) {
+    return;
+  }
+  activeHierarchyModal.remove();
+  activeHierarchyModal = null;
+  document.removeEventListener("keydown", handleHierarchyModalKeydown);
+}
+
+function handleHierarchyModalKeydown(event) {
+  if (event.key === "Escape") {
+    closeHierarchyModal();
+  }
+}
+
+function formatHierarchyForModal(hierarchyText) {
+  if (!hierarchyText) {
+    return "<em>No hierarchy available.</em>";
+  }
+
+  return hierarchyText
+    .split("\n")
+    .map((line) => {
+      const leadingWhitespaceMatch = line.match(/^\s*/);
+      const leadingWhitespace = leadingWhitespaceMatch ? leadingWhitespaceMatch[0] : "";
+      const indentLevel = leadingWhitespace.replace(/\t/g, "  ").length;
+      const nbspIndent = "&nbsp;".repeat(indentLevel);
+      const trimmedLine = line.trimStart();
+      const bulletLine = trimmedLine.startsWith("- ") ? `• ${trimmedLine.slice(2)}` : trimmedLine;
+      return `${nbspIndent}${escapeHtml(bulletLine)}`;
+    })
+    .join("<br />");
+}
 
 function escapeHtml(text) {
   const div = document.createElement("div");

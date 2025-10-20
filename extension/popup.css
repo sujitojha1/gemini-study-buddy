@@ -251,6 +251,64 @@ h2 {
   padding: 0 12px 12px;
 }
 
+.meta-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.meta-rating-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.meta-rating-score {
+  font-size: 1.9rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.meta-rating-description {
+  font-size: 0.85rem;
+  color: var(--muted);
+  max-width: 180px;
+}
+
+.meta-note {
+  margin: 8px 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.hierarchy-button {
+  align-self: flex-start;
+  border: 1px solid rgba(96, 165, 250, 0.45);
+  border-radius: 999px;
+  padding: 8px 16px;
+  background: rgba(96, 165, 250, 0.2);
+  color: var(--fg);
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.hierarchy-button:hover {
+  transform: translateY(-1px);
+  background: rgba(96, 165, 250, 0.3);
+  box-shadow: 0 10px 24px rgba(96, 165, 250, 0.25);
+}
+
+.hierarchy-button:active {
+  transform: translateY(1px);
+}
+
+.hierarchy-button:focus-visible {
+  outline: 2px solid rgba(96, 165, 250, 0.9);
+  outline-offset: 2px;
+}
+
 .flashcard-summary,
 .flashcard-steps {
   background: rgba(15, 23, 42, 0.5);
@@ -356,6 +414,96 @@ h2 {
   border: 2px solid rgba(148, 163, 184, 0.3);
   border-top-color: var(--accent);
   animation: spin 0.8s linear infinite;
+}
+
+.hierarchy-modal-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 1000;
+}
+
+.hierarchy-modal-overlay.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.hierarchy-modal {
+  width: min(340px, calc(100% - 36px));
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 18px;
+  box-shadow: 0 26px 62px rgba(15, 23, 42, 0.55);
+  padding: 20px;
+  box-sizing: border-box;
+  color: var(--fg);
+  outline: none;
+}
+
+.hierarchy-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.hierarchy-modal-header h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.hierarchy-modal-close {
+  border: none;
+  background: rgba(148, 163, 184, 0.2);
+  color: var(--fg);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.2s ease;
+}
+
+.hierarchy-modal-close:hover {
+  transform: rotate(90deg);
+  background: rgba(96, 165, 250, 0.35);
+}
+
+.hierarchy-modal-close:active {
+  transform: scale(0.9);
+}
+
+.hierarchy-modal-close:focus-visible {
+  outline: 2px solid rgba(96, 165, 250, 0.85);
+  outline-offset: 2px;
+}
+
+.hierarchy-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.hierarchy-modal-tree {
+  white-space: normal;
+}
+
+.hierarchy-modal-note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
 }
 
 @keyframes spin {
