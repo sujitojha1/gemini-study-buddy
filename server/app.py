@@ -371,17 +371,19 @@ FINAL_ANSWER: [{"front":"What is AI?","back":"AI is..."}]
             )
 
             response_text = (response.text or "").strip()
-            print(f"LLM Response: {response_text}")
+            
 
             if response_text.startswith("FUNCTION_CALL:"):
                 try:
                     _, function_info = response_text.split(":", 1)
                     func_name, params = [x.strip() for x in function_info.split("|", 1)]
+                    print(f"LLM Response: FUNTION_CALL: {func_name} ")
                 except ValueError as exc:
                     raise HTTPException(status_code=502, detail="Gemini returned an invalid function call.") from exc
 
                 try:
                     iteration_result = await run_in_threadpool(function_caller, func_name, params)
+                    print(f"Results :{iteration_result} ")
                 except Exception as exc:
                     raise HTTPException(status_code=502, detail=f"Function {func_name} failed: {exc}") from exc
 
