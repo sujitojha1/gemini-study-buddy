@@ -334,16 +334,28 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
         iteration_response: list[str] = []
         flashcards: list[Flashcard] | None = None
 
-        system_prompt = """You are learner assistant agent preparing flashcards in iterations. Intention of the agent is to help learner with meaninful content to grasp. 
-        Respond with EXACTLY ONE of these formats:
-        1. FUNCTION_CALL: python_function_name|input
-        2. FINAL_ANSWER: [json]
+        system_prompt = """You are a learning-assistant agent preparing flashcards in iterations.
+Your goal: help the learner deeply grasp content meaningfully.
 
-        where python_function_name is one of the followin:
-        1. rate_content_quality(string) it takes page content as input and returns a page rating from 1-10
-        2. infer_information_hierarchy_and_jobs_simple(string) it takes page content as input and returns a simple tree-like concept hierarchy (<= 3 levels) and a final line: "Note about job function: <>, <>"
-        3. generate_flashcards_json(string) it takes study summary as input and returns a JSON array of flashcards [{"front": "...", "back": "..."}, ...]
-        DO NOT include multiple responses. Give ONE response at a time."""
+Respond with EXACTLY ONE of these two formats:
+1. FUNCTION_CALL: <python_function_name>|<input_text>
+2. FINAL_ANSWER: <json_array>
+
+The python_function_name MUST be one of and follow the sequence:
+- rate_content_quality
+- infer_information_hierarchy_and_jobs_simple
+- generate_flashcards_json
+
+Rules:
+- Do NOT add any text, explanations, or markdown.
+- Output MUST begin with FUNCTION_CALL: or FINAL_ANSWER: as the very first characters (no spaces, no newlines).
+- Never include multiple responses or commentary.
+
+Example valid responses:
+FUNCTION_CALL: rate_content_quality|....
+FINAL_ANSWER: [{"front":"What is AI?","back":"AI is..."}]
+
+"""
 
         base_query = request_text
         current_query = base_query
