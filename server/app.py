@@ -381,7 +381,7 @@ FINAL_ANSWER: [{"front":"What is AI?","back":"AI is..."}]
                 try:
                     _, function_info = response_text.split(":", 1)
                     func_name, params = [x.strip() for x in function_info.split("|", 1)]
-                    print(f"LLM Response: FUNTION_CALL: {func_name} ")
+                    print(f"LLM Response: FUNCTION_CALL: {func_name} ")
                 except ValueError as exc:
                     raise HTTPException(status_code=502, detail="Gemini returned an invalid function call.") from exc
 
@@ -410,11 +410,13 @@ FINAL_ANSWER: [{"front":"What is AI?","back":"AI is..."}]
 
             if response_text.startswith("FINAL_ANSWER:"):
                 final_payload = response_text[len("FINAL_ANSWER:") :].strip()
+                print(f"LLM Response: FINAL_ANSWER: {func_name} ")
                 if not final_payload:
                     raise HTTPException(status_code=502, detail="Gemini returned empty flashcard content.")
 
                 try:
                     flashcards = _parse_flashcards(final_payload, FLASHCARD_COUNT)
+                    print(f"Results: {flashcards} ")
                 except ValueError as exc:
                     raise HTTPException(status_code=502, detail=str(exc)) from exc
 
