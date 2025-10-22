@@ -410,7 +410,7 @@ FINAL_ANSWER: [{"front":"What is AI?","back":"AI is..."}]
 
             if response_text.startswith("FINAL_ANSWER:"):
                 final_payload = response_text[len("FINAL_ANSWER:") :].strip()
-                print(f"LLM Response: FINAL_ANSWER: {func_name} ")
+                print(f"LLM Response: FINAL_ANSWER: {final_payload} ")
                 if not final_payload:
                     raise HTTPException(status_code=502, detail="Gemini returned empty flashcard content.")
 
