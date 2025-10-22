@@ -7,7 +7,7 @@ from rich import box
 import math
 import re
 
-console = Console()
+console = Console(stderr=True)
 mcp = FastMCP("CoTCalculator")
 
 @mcp.tool()

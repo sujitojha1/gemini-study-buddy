@@ -5,3 +5,4 @@ server/venv
 server/__pycache__/
 notebooks/.env
 server/logs/
+references/.env
