@@ -358,7 +358,6 @@ Rules:
 Example valid responses:
 FUNCTION_CALL: rate_content_quality|....
 FINAL_ANSWER: [{"front":"What is AI?","back":"AI is..."}]
-
 """
 
         base_query = request_text
@@ -429,45 +428,6 @@ FINAL_ANSWER: [{"front":"What is AI?","back":"AI is..."}]
             raise HTTPException(status_code=502, detail="Gemini agent did not produce a final answer.")
 
 
-
-
-        # summary_prompt = SUMMARY_PROMPT_TEMPLATE.format(
-        #     page_text=request_text
-        # )
-        # cards_prompt = ""
-        # flashcard_raw = ""
-
-
-    
-        # # Offload Gemini calls to a worker thread to keep the event loop free for I/O.
-        # summary_response = await run_in_threadpool(
-        #     client.models.generate_content,
-        #     model=model_name,
-        #     contents=summary_prompt,
-        # )
-        # summary_raw = _extract_text(summary_response)
-        
-
-        # if not summary_raw:
-        #     raise HTTPException(status_code=502, detail="Gemini returned an empty study summary.")
-
-        # summary_text = summary_raw.strip()
-        # summary_status = "Status: Study summary received from Gemini."
-        # steps.append("Study summary received from Gemini.")
-        # _log_lines([summary_status])
-
-
-        # cards_prompt = FLASHCARD_PROMPT_TEMPLATE.format(
-        #     flashcard_count=FLASHCARD_COUNT,
-        #     study_summary=summary_text,
-        # )
-
-
-        # flashcard_response = await run_in_threadpool(
-        #     client.models.generate_content,
-        #     model=model_name,
-        #     contents=cards_prompt,
-        # )
         cards = {
             f"card_{index}": card
             for index, card in enumerate(flashcards, start=1)
