@@ -358,6 +358,8 @@ Rules:
 Example valid responses:
 FUNCTION_CALL: rate_content_quality|....
 FINAL_ANSWER: [{"front":"What is AI?","back":"AI is..."}]
+
+Let's solve this step by step.
 """
 
         base_query = request_text
