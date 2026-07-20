@@ -2,6 +2,8 @@
 
 Gemini Study Buddy is a Chrome extension that turns any article, research paper, or video transcript into tailored study material powered by Google Gemini Flash 2.0. Highlight the part you care about or let the extension read the entire page to instantly receive flashcards and self-check quizzes matched to your learning goals.
 
+
+
 ## Features
 
 - **AI-generated flashcards** – create 6-10 question/answer pairs in Markdown that you can copy into your favourite spaced repetition tool.
