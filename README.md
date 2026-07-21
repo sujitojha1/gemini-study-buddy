@@ -4,6 +4,8 @@ Gemini Study Buddy is a Chrome extension that turns any article, research paper,
 
 
 
+
+
 ## Features
 
 - **AI-generated flashcards** – create 6-10 question/answer pairs in Markdown that you can copy into your favourite spaced repetition tool.
